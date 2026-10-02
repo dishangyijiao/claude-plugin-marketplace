@@ -61,7 +61,9 @@ jobs:
             log="$LOGS/run-$i.log"
             echo "::group::run $i  load before: $(cut -d' ' -f1-3 /proc/loadavg)"
             t0=$(date +%s)
-            ( __TEST_COMMAND__ ) > "$log" 2>&1     # exactly what the pipeline runs, isolated per run
+            (
+              __TEST_COMMAND__
+            ) > "$log" 2>&1     # exactly what the pipeline runs, isolated per run
             rc=$?
             t1=$(date +%s)
             echo "RESULT run=$i exit=$rc seconds=$((t1 - t0)) load_after=$(cut -d' ' -f1-3 /proc/loadavg)"
