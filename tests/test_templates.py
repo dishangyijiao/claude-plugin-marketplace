@@ -1,6 +1,8 @@
 """Run the shell blocks of the workflow templates for real, with fakes for docker and the test command."""
 
+import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -172,6 +174,47 @@ class RepeatTestsTemplateTests(unittest.TestCase):
     def test_an_exit_in_the_test_command_does_not_end_the_whole_job(self):
         proc, _ = self.run_repeat("exit 3")
         self.assertIn("SUMMARY failures=2 of 2", proc.stdout)
+
+
+@unittest.skipUnless(shutil.which("ruby"), "ruby is not installed")
+class TemplateYamlTests(unittest.TestCase):
+    """Filled-in templates must be valid workflows with the safety settings the docs promise."""
+
+    FILL = {"__BRANCH__": "tmp-audit", "__RUNNER_GROUP__": "ci", "__RUNNER_LABELS__": "[linux, x64]",
+            "__SETUP_COMMAND__": "npm ci", "__RUNS__": "7", "__TEST_COMMAND__": "npm test"}
+
+    def load(self, template):
+        text = template.read_text()
+        for key, value in self.FILL.items():
+            text = text.replace(key, value)
+        proc = subprocess.run(["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.safe_load(STDIN.read))"],
+                              input=text, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        doc = json.loads(proc.stdout)
+        if "true" in doc:  # YAML 1.1 reads the key `on` as a boolean; GitHub treats it as "on"
+            doc["on"] = doc.pop("true")
+        return doc
+
+    def test_both_templates_parse_after_filling_in_the_placeholders(self):
+        for template in (REPEAT, AUDIT):
+            with self.subTest(template=template.name):
+                doc = self.load(template)
+                self.assertEqual(doc["on"]["push"]["branches"], ["tmp-audit"])
+                self.assertEqual(doc["permissions"], {"contents": "read"})
+                job = next(iter(doc["jobs"].values()))
+                self.assertEqual(job["runs-on"], {"group": "ci", "labels": ["linux", "x64"]})
+                self.assertIn("timeout-minutes", job)
+
+    def test_every_action_is_pinned_to_a_full_commit_sha(self):
+        for template in (REPEAT, AUDIT):
+            for step in next(iter(self.load(template)["jobs"].values()))["steps"]:
+                if "uses" in step:
+                    self.assertRegex(step["uses"], r"@[0-9a-f]{40}$", template.name)
+
+    def test_the_checkout_does_not_persist_the_repository_token(self):
+        steps = next(iter(self.load(REPEAT)["jobs"].values()))["steps"]
+        checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout@"))
+        self.assertIs(checkout["with"]["persist-credentials"], False)
 
 
 if __name__ == "__main__":
