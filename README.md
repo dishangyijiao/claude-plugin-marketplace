@@ -107,7 +107,7 @@ Known biases and gaps:
 1. Bump the version: change `version` in `plugins/ci-perf/.claude-plugin/plugin.json` and, if present, in the marketplace entry.
 2. Run `claude plugin tag plugins/ci-perf` to create the `ci-perf--vX.Y.Z` tag (it checks that both versions match), then push the tag.
 
-Current release: `ci-perf--v0.1.0`.
+Current release: `ci-perf--v0.1.1`.
 
 ## Not done yet / known limitations
 

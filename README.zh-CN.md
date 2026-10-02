@@ -106,7 +106,7 @@ claude plugin eval plugins/ci-perf --eval-dir evals-extra --allow-tools Bash Wri
 1. 升版本：同时改 `plugins/ci-perf/.claude-plugin/plugin.json` 的 `version` 和（如有）市场条目。
 2. `claude plugin tag plugins/ci-perf` 打 `ci-perf--vX.Y.Z` 标签（会校验两处版本一致），再推送标签。
 
-当前版本：`ci-perf--v0.1.0`。
+当前版本：`ci-perf--v0.1.1`。
 
 ## 还没做 / 已知局限
 
