@@ -41,13 +41,13 @@ case "$*" in
 esac
 """.replace("@A", HEX_A).replace("@B", HEX_B).replace("@NAMED", NAMED)
 
-    def run_audit(self, info_exit=0):
+    def run_audit(self, info_exit=0, fakes=None):
         with tempfile.TemporaryDirectory() as tmp:
             fake_bin = Path(tmp, "bin")
             fake_bin.mkdir()
-            docker = fake_bin / "docker"
-            docker.write_text(self.FAKE_DOCKER)
-            docker.chmod(0o755)
+            for name, body in {"docker": self.FAKE_DOCKER, **(fakes or {})}.items():
+                (fake_bin / name).write_text(body)
+                (fake_bin / name).chmod(0o755)
             env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", HOME=tmp, RUNNER_NAME="r", DOCKER_INFO_EXIT=str(info_exit))
             proc = subprocess.run(["bash", "-c", run_block(AUDIT)], env=env, capture_output=True, text=True, cwd=tmp)
         return proc
@@ -65,6 +65,38 @@ esac
         out = self.run_audit(info_exit=1).stdout.lower()
         self.assertIn("docker daemon is not reachable", out)
         self.assertNotIn("total volumes:", out)
+
+    # `du` is the only command whose output carries attacker-controlled file names.
+    HOSTILE_DU = """#!/bin/sh
+case "$*" in
+  *"/var/log"*) echo "1K	/var/log" ;;
+  *) printf '4K\tinnocent\\n   ::add-mask::hunter2\\n::stop-commands::x\\n' ;;
+esac
+"""
+
+    def test_directory_names_cannot_inject_workflow_commands_into_the_log(self):
+        out = self.run_audit(fakes={"du": self.HOSTILE_DU}).stdout
+        injected = [l for l in out.splitlines() if l.lstrip().startswith("::") and not l.startswith(("::group::", "::endgroup::"))]
+        self.assertEqual(injected, [])
+        self.assertIn("__::add-mask::hunter2", out)
+
+    def test_each_du_listing_is_filtered(self):
+        out = self.run_audit(fakes={"du": self.HOSTILE_DU}).stdout
+        self.assertEqual(out.count("__::stop-commands::x"), 3, out)
+
+    def test_without_docker_the_audit_says_so_and_still_finishes(self):
+        import shutil
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp, "bin")
+            bin_dir.mkdir()
+            for tool in ("bash", "sed", "du", "df", "sort", "head", "grep", "id", "cat", "tr", "wc", "xargs", "uniq", "cut"):
+                (bin_dir / tool).symlink_to(shutil.which(tool))
+            env = {"PATH": str(bin_dir), "HOME": tmp, "RUNNER_NAME": "r"}
+            proc = subprocess.run([str(bin_dir / "bash"), "-c", run_block(AUDIT)], env=env, capture_output=True, text=True, cwd=tmp)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("docker not installed on this runner", proc.stdout)
+        self.assertIn("system directories and logs", proc.stdout)
 
 
 class RepeatTestsTemplateTests(unittest.TestCase):
@@ -104,6 +136,33 @@ class RepeatTestsTemplateTests(unittest.TestCase):
         _, logs = self.run_repeat("echo first; echo second; false", runs="1")
         self.assertIn("first", logs["run-1.log"])
         self.assertIn("second", logs["run-1.log"])
+
+    def test_a_multiline_test_command_with_a_heredoc_works(self):
+        proc, logs = self.run_repeat("cat <<EOT\nline one\nEOT\nfalse", runs="1")
+        self.assertIn("SUMMARY failures=1 of 1", proc.stdout, proc.stderr)
+        self.assertIn("line one", logs["run-1.log"])
+
+    def test_test_output_cannot_inject_workflow_commands_into_the_log(self):
+        proc, _ = self.run_repeat("echo '   ::add-mask::hunter2'; echo 'FAIL x ::stop-commands::'; exit 1", runs="1")
+        injected = [l for l in proc.stdout.splitlines() if l.lstrip().startswith("::") and not l.startswith(("::group::", "::endgroup::"))]
+        self.assertEqual(injected, [], proc.stdout)
+        self.assertIn("__::add-mask::hunter2", proc.stdout)
+
+    def test_failure_section_shows_first_40_matches_and_tail_shows_last_40_lines(self):
+        proc, _ = self.run_repeat("for n in $(seq 1 100); do echo \"FAIL $n\"; done; exit 1", runs="1")
+        self.assertIn("40:FAIL 40", proc.stdout)
+        self.assertNotIn("41:FAIL 41", proc.stdout)
+        tail = proc.stdout.split("last 40 lines of run 1 ----", 1)[1]
+        self.assertIn("FAIL 61", tail)
+        self.assertNotIn("FAIL 60\n", tail)
+
+    def test_only_failed_runs_leave_a_failed_log_for_the_artifact(self):
+        script = run_block(REPEAT).replace("__TEST_COMMAND__", 'test "$(cat n 2>/dev/null || echo 0)" != 1 && { echo 1 > n; exit 1; }; true')
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, RUNS="3", RUNNER_TEMP=f"{tmp}/temp", RUNNER_NAME="r", CI="true")
+            subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script], env=env, capture_output=True, text=True, cwd=tmp)
+            names = sorted(f.name for f in Path(tmp, "temp", "repeat-logs").glob("FAILED-*.log"))
+        self.assertEqual(names, ["FAILED-run-1.log"])
 
     def test_an_exit_in_the_test_command_does_not_end_the_whole_job(self):
         proc, _ = self.run_repeat("exit 3")
