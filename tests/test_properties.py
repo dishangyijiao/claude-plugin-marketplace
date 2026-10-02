@@ -486,7 +486,7 @@ def render(rng, jobs, plain=False):
         out.append(f"{ind1}{name}:{eol}")
         comment = "" if plain else rng.choice(["", " # self-hosted", " # ubuntu-latest", " # note"])
         if form == "uses":
-            out.append(f"{ind2}uses: {payload}{eol}")
+            out.append(f"{ind2}uses: {payload}{comment}{eol}")
         elif form == "scalar":
             out.append(f"{ind2}runs-on: {payload}{comment}{eol}")
         elif form == "flow":

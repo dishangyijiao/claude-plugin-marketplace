@@ -419,7 +419,11 @@ class InlineReusableTests(unittest.TestCase):
         self.assertEqual(rows, [{"job": "a", "kind": "reusable", "value": "./.github/workflows/x.yml"}])
 
 
-class ReusableValueTests(unittest.TestCase):
+class ReusableCommentTests(unittest.TestCase):
+    def test_a_trailing_comment_is_not_part_of_the_called_workflow(self):
+        rows = audit_runs_on.classify_workflow("jobs:\n  a:\n    uses: ./.github/workflows/x.yml # shared build\n")
+        self.assertEqual(rows, [{"job": "a", "kind": "reusable", "value": "./.github/workflows/x.yml"}])
+
     def test_a_hash_without_a_space_before_it_belongs_to_the_value(self):
         rows = audit_runs_on.classify_workflow("jobs:\n  a:\n    uses: org/repo/.github/workflows/x.yml@v1#tag\n")
         self.assertEqual(rows[0]["value"], "org/repo/.github/workflows/x.yml@v1#tag")
