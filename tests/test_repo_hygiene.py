@@ -75,6 +75,32 @@ class ManifestTests(unittest.TestCase):
             self.assertRegex(front, r"(?m)^description: .{40,}")
 
 
+class SkillBundledPathTests(unittest.TestCase):
+    """Skills run in the USER'S project directory, not in the plugin directory.
+
+    A bare `scripts/x.py` therefore points at nothing once the plugin is installed.
+    Installed plugins reference bundled files through ${CLAUDE_PLUGIN_ROOT}; every
+    reference must use it and must resolve to a file that really exists.
+    """
+
+    TOKEN = re.compile(r"[^\s`'\"()<>]*(?:scripts|templates)/[\w.\-]+")
+    PREFIX = "${CLAUDE_PLUGIN_ROOT}/"
+
+    def test_every_bundled_file_reference_uses_the_plugin_root_and_exists(self):
+        problems = []
+        skills = list((ROOT / "plugins").glob("*/skills/*/SKILL.md"))
+        self.assertTrue(skills)
+        for skill in skills:
+            plugin_dir = skill.parents[2]
+            for match in self.TOKEN.finditer(skill.read_text()):
+                token = match.group(0)
+                if not token.startswith(self.PREFIX):
+                    problems.append(f"{skill.relative_to(ROOT)}: bare path {token!r}")
+                elif not (plugin_dir / token[len(self.PREFIX):]).exists():
+                    problems.append(f"{skill.relative_to(ROOT)}: {token!r} does not exist")
+        self.assertEqual(problems, [])
+
+
 class ReadOnlyTemplateTests(unittest.TestCase):
     def test_audit_template_has_no_destructive_commands(self):
         template = ROOT / "plugins" / "ci-perf" / "skills" / "self-hosted-runner-health" / "templates" / "runner-readonly-audit.yml"

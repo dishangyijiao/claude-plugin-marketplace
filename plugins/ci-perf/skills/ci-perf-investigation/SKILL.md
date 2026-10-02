@@ -9,7 +9,7 @@ description: Use when CI is slow, queues for a long time, or you are asked to op
 
 ## 铁律
 
-1. **先取数据，不凭感觉。** 用 `scripts/ci_timing.py` 取 job/step 级耗时，不要只看总时长。
+1. **先取数据，不凭感觉。** 用 `${CLAUDE_PLUGIN_ROOT}/scripts/ci_timing.py` 取 job/step 级耗时，不要只看总时长。
 2. **用开发者感受的指标：** PR 事件到"必过检查"完成（含排队）。通知类 job 排在必过检查之后，它排队**不影响**开发者等待。
 3. **排队和运行分开看。** 排队长 ≠ 运行慢，处理办法完全不同。
 4. **一次只改一件事，每个改动单独归因。** 否则无法回答"到底哪个有用"。
@@ -20,9 +20,9 @@ description: Use when CI is slow, queues for a long time, or you are asked to op
 
 ```bash
 # 1. 取数据（只读；需要 gh 已登录）
-python3 scripts/ci_timing.py collect --repo OWNER/NAME --workflow ci.yml --since YYYY-MM-DD --out runs.json
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ci_timing.py collect --repo OWNER/NAME --workflow ci.yml --since YYYY-MM-DD --out runs.json
 # 2. 看四张表
-python3 scripts/ci_timing.py report runs.json \
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/ci_timing.py report runs.json \
     --check "<必过检查的 job 名>" --steps "<最慢的 job 名>" \
     --overlap-target "<最重的 job 名>" --heavy "<其他重 job 名,逗号分隔>"
 ```
@@ -52,7 +52,7 @@ python3 scripts/ci_timing.py report runs.json \
 - **空闲时的收益 ≠ 并发下的收益。** 把测试 worker 从 4 调到 8，空闲时快约 30%，但并发下可能更慢或更不稳。
 - **"迁移只跑一次再克隆模板库"：** 墙钟时间几乎不变（一个 worker 迁移，其余在等），收益只在并发时少占 CPU，需要对照证明。
 - **给数据库挂 tmpfs / 关 fsync 当提速：** 空闲时没有可测收益；但 tmpfs 能阻止镜像声明的匿名卷泄漏，**理由不同，别混为一谈**。
-- **把轻量任务挪到 GitHub 托管 runner** 看似减少排队，实际会消耗托管分钟（免费额度有限，每个 job 至少按 1 分钟计）。先用 `scripts/audit_runs_on.py` 看哪些 job 在耗分钟、跑得多频繁。
+- **把轻量任务挪到 GitHub 托管 runner** 看似减少排队，实际会消耗托管分钟（免费额度有限，每个 job 至少按 1 分钟计）。先用 `${CLAUDE_PLUGIN_ROOT}/scripts/audit_runs_on.py` 看哪些 job 在耗分钟、跑得多频繁。
 - **对照组如果恰好是最坏情况**（比如缓存未命中的那次），收益会被夸大；写明它是不是典型。
 
 ## 这些工具的局限（用之前先看）

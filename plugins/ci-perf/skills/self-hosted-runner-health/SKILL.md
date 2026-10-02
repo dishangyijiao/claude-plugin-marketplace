@@ -9,7 +9,7 @@ description: Use when self-hosted GitHub Actions runners fail randomly, run out 
 
 ## 1. 没有登录权限也能审计：push 触发的临时 workflow
 
-SSH 连不上、没有密码、没有 guest agent 时，让 runner **自己报告**。用 `templates/runner-readonly-audit.yml`：
+SSH 连不上、没有密码、没有 guest agent 时，让 runner **自己报告**。用 `${CLAUDE_PLUGIN_ROOT}/skills/self-hosted-runner-health/templates/runner-readonly-audit.yml`：
 
 - 它必须是 `on: push`（限定到一个临时分支）：`workflow_dispatch` 要求文件已经在默认分支上，而 push 触发的 workflow 可以直接从任意分支运行。
 - 命令全部只读（`df`、`du`、`docker system df`、卷计数）。
@@ -57,10 +57,15 @@ docker volume ls -q -f dangling=true -f label=com.docker.volume.anonymous | grep
 - **设容量上限**，超限就清空重来，避免撑满共享磁盘；
 - 先写测试（持久、按实例隔离、超限重置、路径校验）。
 
+**验证时别夸大收益：**
+- 对比"锁文件变化、缓存未命中"的那类运行，改动前后各看 `Post <action>` 步骤和安装步骤的耗时。
+- **第一次在某个 runner 实例上存储是空的**，热存储的收益要**同一个 runner 的第二次运行**才看得到；拿单次运行下结论是错的。
+- 旧方案那次"缓存未命中"是**最坏情况**。缓存命中的普通日子，旧方案的额外开销通常只有几十秒。汇报时两种都要写，不要把最坏情况当成平均收益；再用锁文件多久变一次（`git log -- <锁文件>`）估算最坏情况出现得有多频繁。
+
 ## 4. 哪些 job 在消耗 GitHub 托管分钟
 
 ```bash
-python3 scripts/audit_runs_on.py <仓库目录>
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/audit_runs_on.py <仓库目录>
 ```
 
 只做静态分析，不猜测：`github-hosted` / `self-hosted` / `dynamic`（表达式，需人工看）/ `reusable`（由被调用方决定）。**频率比标签重要**：每个 PR 都跑的托管 job，远比只在发布时跑的耗费多；每个 job 至少按 1 分钟计，被 `if:` 跳过的不计费。

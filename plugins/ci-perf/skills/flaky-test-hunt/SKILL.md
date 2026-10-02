@@ -15,7 +15,7 @@ description: Use when tests fail intermittently in CI (green locally, fails 1 in
 
 ## 2. 量出频率，并保留证据
 
-用 `templates/repeat-tests.yml`：在一台**空闲**的 runner 上，**原样**重复运行 CI 里的测试命令 N 次（建议 ≥ 7），每一轮：
+用 `${CLAUDE_PLUGIN_ROOT}/skills/flaky-test-hunt/templates/repeat-tests.yml`：在一台**空闲**的 runner 上，**原样**重复运行 CI 里的测试命令 N 次（建议 ≥ 7），每一轮：
 
 - 完整输出写进日志文件（**不要只留 tail**，runner 清理后就没了）；
 - 失败时直接在步骤日志里打印失败的测试名和错误栈，并把失败轮次的日志上传成 artifact；
