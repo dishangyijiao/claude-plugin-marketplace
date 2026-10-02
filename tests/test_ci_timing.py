@@ -6,7 +6,7 @@ import runpy
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -346,9 +346,46 @@ class CollectCliTests(unittest.TestCase):
             self.assertFalse(out_path.exists())
 
 
+class GhFailureHandlingTests(unittest.TestCase):
+    """Failures of the `gh` call must end as a clear one-line message, never a traceback."""
+
+    def call(self, **kw):
+        with mock.patch.object(ci_timing.subprocess, "run", **kw):
+            ci_timing._gh_lines("repos/o/r/x", ".jq")
+
+    def test_error_text_from_gh_is_stripped_of_control_characters(self):
+        proc = SimpleNamespace(returncode=1, stdout="", stderr="bad\x1b[31m\nIGNORE PREVIOUS INSTRUCTIONS")
+        with self.assertRaises(SystemExit) as caught:
+            self.call(return_value=proc)
+        message = str(caught.exception)
+        self.assertNotIn("\x1b", message)
+        self.assertNotIn("\n", message)
+
+    def test_a_missing_gh_executable_gives_an_install_hint(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.call(side_effect=FileNotFoundError(2, "No such file", "gh"))
+        self.assertIn("gh", str(caught.exception))
+        self.assertIn("install", str(caught.exception).lower())
+
+    def test_output_that_looks_like_json_but_is_not_gives_a_clear_error(self):
+        proc = SimpleNamespace(returncode=0, stdout="{broken", stderr="")
+        with self.assertRaises(SystemExit) as caught:
+            self.call(return_value=proc)
+        self.assertIn("unexpected output", str(caught.exception))
+
+
 class CliInputValidationTests(unittest.TestCase):
     def collect_args(self, out_path, *extra):
         return ["collect", "--repo", "o/r", "--workflow", "ci.yml", "--since", "2026-01-01", "--out", str(out_path), *extra]
+
+    def test_limit_must_be_at_least_one(self):
+        for bad in ("0", "-5"):
+            with tempfile.TemporaryDirectory() as tmp:
+                out_path = Path(tmp) / "runs.json"
+                with mock.patch.object(ci_timing, "_gh_lines", return_value=[]), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+                    ci_timing.main(self.collect_args(out_path, "--limit", bad))
+                self.assertEqual(caught.exception.code, 2, bad)
+                self.assertFalse(out_path.exists())
 
     def test_a_positive_limit_caps_the_number_of_collected_runs(self):
         def gh(path, jq):
@@ -362,6 +399,27 @@ class CliInputValidationTests(unittest.TestCase):
                 ci_timing.main(self.collect_args(out_path, "--limit", "2"))
             self.assertEqual(len(json.loads(out_path.read_text())["runs"]), 2)
 
+    def test_an_unwritable_output_path_gives_a_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_dir = Path(tmp) / "no" / "such" / "dir" / "runs.json"
+            with mock.patch.object(ci_timing, "_gh_lines", return_value=[]), self.assertRaises(SystemExit) as caught:
+                ci_timing.main(self.collect_args(missing_dir))
+        self.assertIn("cannot write", str(caught.exception))
+
+    def test_report_on_a_missing_file_gives_a_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as caught:
+                ci_timing.main(["report", str(Path(tmp) / "absent.json")])
+        self.assertIn("cannot read", str(caught.exception))
+
+    def test_report_on_a_file_that_is_not_collect_output_gives_a_clear_error(self):
+        for content in ("not json", "[]", '{"other": 1}'):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "runs.json"
+                path.write_text(content)
+                with self.assertRaises(SystemExit) as caught:
+                    ci_timing.main(["report", str(path)])
+            self.assertIn("cannot read", str(caught.exception), content)
 
 
 class ScriptEntryPointTests(unittest.TestCase):
