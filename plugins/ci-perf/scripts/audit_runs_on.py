@@ -53,6 +53,23 @@ def _kind(value: str) -> str:
     return "dynamic"
 
 
+_JOB_KEY = re.compile(r"^\s*(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z0-9_-]+)):\s*(.*?)\s*$")
+_FLOW_RUNS_ON = re.compile(r"runs-on:\s*(\[[^\]]*\]|[^,}]+)")
+_FLOW_USES = re.compile(r"uses:\s*([^,}]+)")
+
+
+def _inline_job(rest: str):
+    """kind and value of a job written on one line: `{runs-on: ...}`, an alias, ..."""
+    uses = _FLOW_USES.search(rest) if rest.startswith("{") else None
+    if uses:
+        return "reusable", uses.group(1).strip()
+    runs_on = _FLOW_RUNS_ON.search(rest) if rest.startswith("{") else None
+    if runs_on:
+        value = runs_on.group(1).strip().strip("\"'")
+        return _kind(value), value
+    return "dynamic", rest
+
+
 def _indent(line: str) -> int:
     return len(line) - len(line.lstrip(" "))
 
@@ -81,9 +98,11 @@ def classify_workflow(text: str):
         if job_indent is None:
             job_indent = indent
         if indent == job_indent:
-            match = re.match(r"^\s*([A-Za-z0-9_-]+):\s*(#.*)?$", line)
+            match = _JOB_KEY.match(line)
             if match:
-                rows.append({"job": match.group(1), "kind": "dynamic", "value": ""})
+                rest = _strip_comment(match.group(4)) if not match.group(4).startswith("#") else ""
+                kind, value = _inline_job(rest) if rest else ("dynamic", "")
+                rows.append({"job": match.group(1) or match.group(2) or match.group(3), "kind": kind, "value": value})
                 prop_indent = None
             continue
         if not rows or indent < job_indent:
@@ -102,7 +121,7 @@ def classify_workflow(text: str):
                 for nxt in lines[idx + 1 :]:
                     if _skippable(nxt):
                         continue
-                    if _indent(nxt) > prop_indent:
+                    if _indent(nxt) > prop_indent or (_indent(nxt) == prop_indent and nxt.lstrip().startswith("- ")):
                         block.append(_strip_comment(nxt.strip()))
                     else:
                         break
@@ -118,24 +137,29 @@ def workflow_files(repo_dir: Path):
     # anything on the machine: stay inside the repository and skip symlinked files.
     root = Path(repo_dir).resolve()
     workflows = (root / ".github" / "workflows").resolve()
-    if root not in workflows.parents:
+    if root not in workflows.parents or not workflows.is_dir():
         return []
     return sorted(
-        p for p in workflows.glob("*.y*ml")
-        if p.is_file() and not p.is_symlink() and p.stat().st_size <= MAX_WORKFLOW_BYTES
+        p for p in workflows.iterdir()
+        if p.suffix in (".yml", ".yaml") and p.is_file() and not p.is_symlink() and p.stat().st_size <= MAX_WORKFLOW_BYTES
     )
 
 
 def audit_directory(repo_dir: Path):
     rows = []
     for path in workflow_files(repo_dir):
-        for row in classify_workflow(path.read_text()):
+        for row in classify_workflow(path.read_text(encoding="utf-8-sig", errors="replace")):
             rows.append({"file": path.name, **row})
     return rows
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")  # a CJK file name must not crash the audit under an ASCII locale
+    if argv and argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
     repo = Path(argv[0]) if argv else Path.cwd()
     files = workflow_files(repo)
     if not files:
