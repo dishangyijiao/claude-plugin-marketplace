@@ -399,5 +399,25 @@ class CommandLineSummaryTests(unittest.TestCase):
         self.assertIn("1 of 3 jobs use GitHub-hosted runners", out.getvalue())
 
 
+class OutputFormatTests(unittest.TestCase):
+    def test_a_row_is_three_padded_columns_cut_at_28_28_and_60_then_the_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / ("f" * 35 + ".yml")).write_text(f'jobs:\n  "{"j" * 40}":\n    runs-on: ubuntu-{"x" * 80}\n  short:\n    runs-on: self-hosted\n')
+            out = io.StringIO()
+            with redirect_stdout(out):
+                audit_runs_on.main([tmp])
+        first, second = out.getvalue().split("\n")[:2]
+        self.assertEqual(first, f"{'f' * 28} {'j' * 28} {'github-hosted':14s} {('ubuntu-' + 'x' * 80)[:60]}")
+        self.assertEqual(second, f"{'f' * 28} {'short':28s} {'self-hosted':14s} self-hosted")
+
+
+class InlineReusableTests(unittest.TestCase):
+    def test_an_inline_job_calling_a_workflow_keeps_only_the_path_as_its_value(self):
+        rows = audit_runs_on.classify_workflow("jobs:\n  a: {uses: ./.github/workflows/x.yml, with: {k: v}}\n")
+        self.assertEqual(rows, [{"job": "a", "kind": "reusable", "value": "./.github/workflows/x.yml"}])
+
+
 if __name__ == "__main__":
     unittest.main()

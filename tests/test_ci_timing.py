@@ -4,6 +4,7 @@ import argparse
 import io
 import json
 import os
+import re
 import runpy
 import shutil
 import subprocess
@@ -840,14 +841,186 @@ class CommandLineBoundaryTests(unittest.TestCase):
         self.assertEqual(fake.call_args.args[3:5], (100, {"pull_request", "push"}))
 
     def test_help_describes_every_argument(self):
-        for argv, phrases in ((["collect", "--help"], ["OWNER/NAME", "workflow file name", "YYYY-MM-DD", "comma list; empty = all"]),
-                              (["--help"], ["download runs, jobs and steps", "print statistics from a collected file"]),
-                              (["report", "--help"], ["required-check job name", "break down by step", "bucketed by concurrent", "counted as neighbours", "cross-repo"])):
+        cases = (
+            (["collect", "--help"], ["OWNER/NAME", "workflow file name, e.g. ci.yml", "YYYY-MM-DD", "comma list; empty = all"]),
+            (["--help"], ["download runs, jobs and steps with `gh api` (read-only)", "print statistics from a collected file"]),
+            (["report", "--help"], ["one or more files from `collect` (pass several to see cross-repo contention)",
+                                    "required-check job name for time-to-check", "comma list of job names to break down by step",
+                                    "job whose run time is bucketed by concurrent neighbours", "comma list of job names counted as neighbours"]),
+        )
+        for argv, phrases in cases:
             out = io.StringIO()
             with self.subTest(argv=argv), redirect_stdout(out), self.assertRaises(SystemExit):
                 ci_timing.main(argv)
+            text = " ".join(out.getvalue().split())
             for phrase in phrases:
-                self.assertIn(phrase, " ".join(out.getvalue().split()))
+                self.assertRegex(text, re.escape(phrase) + r"(?!\S)")
+
+
+class ReportGoldenTests(unittest.TestCase):
+    """The whole report, character for character, for data small enough to check by hand."""
+
+    def test_a_full_report_matches_the_hand_computed_output(self):
+        runs = [
+            {"id": 1, "event": "push", "jobs": [
+                job("unit", 0, 10, 70, runner="r1", steps=[step("checkout", 10, 20), step("test", 20, 70)]),
+                job("lint", 0, 6, 36, runner="r2")]},
+            {"id": 2, "event": "push", "jobs": [
+                job("unit", 100, 130, 220, runner="r1", conclusion="failure", steps=[step("checkout", 130, 136), step("test", 135, 215)]),
+                job("lint", 100, 100, 130, runner="r2"),
+                job("skew", 100, 90, 95)]},
+        ]
+        expected = "\n".join([
+            "2 runs (1 job(s) skipped: missing or inconsistent timestamps, e.g. runner clock skew)",
+            "",
+            "== Jobs (queue = waiting for a runner, run = executing)",
+            "job                                   n fail  queue med  queue p90   run med   run p90   run max",
+            "unit                                  2    1        20s        30s       75s       90s       90s",
+            "lint                                  2    0         3s         6s       30s       30s       30s",
+            "",
+            "== Slowest steps of 'unit' (include 'Post ...' steps)",
+            "  test                                             median     65s  max     80s  n=2",
+            "  checkout                                         median      8s  max     10s  n=2",
+            "",
+            "== Slowest steps of 'nope' (include 'Post ...' steps)",
+            "  (no data: no finished job with this name has steps; check the spelling)",
+            "",
+            "== Time to required check 'unit' (first job created -> check done), n=2",
+            "  median   1.6 min   p90   2.0 min   max   2.0 min",
+            "",
+            "== 'unit' run time by number of other heavy jobs running at the same time",
+            "  0 neighbours: n=  1  median     90s  min     90s  max     90s",
+            "  1 neighbours: n=  1  median     60s  min     60s  max     60s",
+            "  (a large jump with neighbours = CPU/IO contention on a shared host)",
+        ])
+        self.assertEqual(ci_timing.report(runs, check="unit", steps=["unit", "nope"], overlap_target="unit", heavy=["lint"]), expected)
+
+    def test_a_report_without_any_data_matches_the_exact_output(self):
+        expected = "\n".join([
+            "0 runs",
+            "",
+            "== Jobs (queue = waiting for a runner, run = executing)",
+            "job                                   n fail  queue med  queue p90   run med   run p90   run max",
+            "",
+            "== Slowest steps of 'y' (include 'Post ...' steps)",
+            "  (no data: no finished job with this name has steps; check the spelling)",
+            "",
+            "== Time to required check 'x' (first job created -> check done), n=0",
+            "",
+            "== 'z' run time by number of other heavy jobs running at the same time",
+            "  (no data: no finished job with this name; check the spelling)",
+        ])
+        self.assertEqual(ci_timing.report([], check="x", steps=["y"], overlap_target="z"), expected)
+
+    def test_names_are_cut_at_34_characters_in_jobs_and_48_in_steps(self):
+        long_job, long_step = "j" * 50, "s" * 60
+        text = ci_timing.report([{"id": 1, "jobs": [job(long_job, 0, 1, 2, steps=[step(long_step, 1, 2)])]}], steps=[long_job])
+        self.assertIn(f"{'j' * 34} ", text)
+        self.assertNotIn("j" * 35, text.replace(f"'{long_job}'", ""))
+        self.assertIn(f"  {'s' * 48} ", text)
+        self.assertNotIn("s" * 49, text)
+
+
+class MessageExactnessTests(unittest.TestCase):
+    def message(self, call, *args):
+        with self.assertRaises(SystemExit) as caught:
+            call(*args)
+        return str(caught.exception)
+
+    def test_validation_errors_show_at_most_40_or_60_characters_of_the_bad_value(self):
+        long = "x" * 100
+        self.assertEqual(self.message(ci_timing.validate_since, long),
+                         f"--since must be a calendar date such as 2026-09-01, got {'x' * 40!r}")
+        self.assertEqual(self.message(ci_timing.validate_since, "2026-13-45"),
+                         "--since must be a calendar date such as 2026-09-01, got '2026-13-45'")
+        self.assertEqual(self.message(ci_timing.validate_target, long + "!", "ci.yml"),
+                         f"--repo must look like OWNER/NAME, got {('x' * 60)!r}")
+        self.assertEqual(self.message(ci_timing.validate_target, "o/r", long + "!"),
+                         f"--workflow must be a workflow file name such as ci.yml, got {('x' * 60)!r}")
+
+    def test_a_missing_gh_says_how_to_install_and_log_in(self):
+        with mock.patch.object(ci_timing.subprocess, "run", side_effect=FileNotFoundError):
+            text = self.message(ci_timing._gh_lines, "repos/x", ".")
+        self.assertEqual(text, "the GitHub CLI `gh` was not found: install it (https://cli.github.com), then run `gh auth login`")
+
+    def test_a_failing_gh_shows_at_most_300_characters_of_stderr(self):
+        proc = SimpleNamespace(returncode=1, stdout="", stderr="e" * 400)
+        with mock.patch.object(ci_timing.subprocess, "run", return_value=proc):
+            self.assertEqual(self.message(ci_timing._gh_lines, "repos/x", "."), f"gh api failed for repos/x: {'e' * 300}")
+
+    def test_the_run_filter_is_requested_with_the_exact_gh_arguments(self):
+        proc = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with mock.patch.object(ci_timing.subprocess, "run", return_value=proc) as fake:
+            ci_timing._gh_lines("repos/x", ".foo")
+        self.assertEqual(fake.call_args.args[0], ["gh", "api", "repos/x", "--jq", ".foo"])
+        self.assertEqual(fake.call_args.kwargs, {"capture_output": True, "text": True, "encoding": "utf-8", "errors": "replace", "check": False})
+
+    def test_limit_error_text_is_exact(self):
+        with self.assertRaises(argparse.ArgumentTypeError) as caught:
+            ci_timing._positive_int("0")
+        self.assertEqual(str(caught.exception), "must be at least 1")
+
+    def test_unreadable_files_report_the_system_reason_cut_at_120_characters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = str(Path(tmp, "nope.json"))
+            self.assertEqual(self.message(ci_timing._load_runs, missing), f"cannot read {missing}: No such file or directory")
+            bad = Path(tmp, "bad.json")
+            bad.write_text("{")
+            self.assertEqual(self.message(ci_timing._load_runs, str(bad)),
+                             f"cannot read {bad}: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)")
+            with mock.patch.object(Path, "read_text", side_effect=OSError(5, "e" * 200)):
+                self.assertEqual(self.message(ci_timing._load_runs, "x.json"), f"cannot read x.json: {'e' * 120}")
+            bad.write_text("[]")
+            self.assertEqual(self.message(ci_timing._load_runs, str(bad)), f"cannot read {bad}: not a file written by `collect`")
+
+    def test_an_unwritable_output_reports_the_system_reason_cut_at_120_characters(self):
+        argv = ["collect", "--repo", "o/r", "--workflow", "ci.yml", "--since", "2026-01-01", "--out"]
+        with mock.patch.object(ci_timing, "collect", return_value=[]):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = str(Path(tmp, "missing-dir", "o.json"))
+                self.assertEqual(self.message(ci_timing.main, argv + [out]), f"cannot write {out}: No such file or directory")
+            with mock.patch.object(Path, "write_text", side_effect=OSError(13, "e" * 200)):
+                self.assertEqual(self.message(ci_timing.main, argv + ["o.json"]), f"cannot write o.json: {'e' * 120}")
+
+
+class PercentileOfAHundredTests(unittest.TestCase):
+    def test_the_90th_percentile_of_100_jobs_is_the_90th_fastest_not_the_89th(self):
+        jobs = [job("a", 0, q, q + q) for q in range(1, 101)]
+        stats = ci_timing.job_stats([{"id": 1, "jobs": jobs}])["a"]
+        self.assertEqual(stats["queue_p90"], 90)
+        self.assertEqual(stats["run_p90"], 90)
+
+
+class MergeFilesTests(unittest.TestCase):
+    def test_runs_seen_in_an_earlier_file_are_dropped_but_later_new_runs_are_kept(self):
+        def make(*ids):
+            return {"runs": [{"id": i, "event": "push", "jobs": [job("unit", 0, 1, 11)]} for i in ids]}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = Path(tmp, "a.json"), Path(tmp, "b.json")
+            a.write_text(json.dumps(make(1, 2)))
+            b.write_text(json.dumps(make(2, 3, 4)))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                ci_timing.main(["report", str(a), str(b)])
+        self.assertTrue(out.getvalue().startswith("4 runs"))
+
+
+class TimeToCheckLineTests(unittest.TestCase):
+    def test_the_line_shows_minutes_and_the_90th_percentile_of_100_runs(self):
+        runs = [{"id": k, "jobs": [job("unit", 0, 1, 60 * k)]} for k in range(1, 101)]
+        text = ci_timing.report(runs, check="unit")
+        self.assertIn("n=100\n  median  50.5 min   p90  90.0 min   max 100.0 min", text)
+
+    def test_two_runs_give_exact_minutes_for_median_p90_and_max(self):
+        runs = [{"id": 1, "jobs": [job("unit", 0, 1, 600)]}, {"id": 2, "jobs": [job("unit", 0, 1, 1200)]}]
+        self.assertIn("  median  15.0 min   p90  20.0 min   max  20.0 min", ci_timing.report(runs, check="unit"))
+
+
+class StepStatsOtherJobsTests(unittest.TestCase):
+    def test_jobs_with_other_names_before_the_wanted_one_are_skipped_not_a_stop(self):
+        runs = [{"id": 1, "jobs": [job("other", 0, 0, 9, steps=[step("x", 0, 9)]), job("build", 0, 0, 9, steps=[step("t", 0, 5)])]}]
+        self.assertEqual(ci_timing.step_stats(runs, "build"), [("t", 5.0, 5.0, 1)])
 
 
 if __name__ == "__main__":
