@@ -31,7 +31,7 @@ python3 plugins/ci-perf/scripts/audit_runs_on.py <仓库目录>
 ## 安装
 
 ```bash
-claude plugin marketplace add <你的 GitHub 用户名>/claude-plugin-marketplace
+claude plugin marketplace add dishangyijiao/claude-plugin-marketplace
 claude plugin install ci-perf@dishangyijiao-plugins
 ```
 
@@ -67,7 +67,7 @@ claude plugin eval plugins/ci-perf --eval-dir evals-extra --allow-tools Bash Wri
 
 > 在我的机器上它**跑不起来**：授权 `Bash` 会触发沙箱安全检查，而 `~/.docker`（Docker 凭据存储）里有符号链接，评测框架会整体拒绝。所以我改用一次受限的非交互调用单独验证了两段：技能被触发后 `${CLAUDE_PLUGIN_ROOT}` 展开成真实路径；脚本在代理写出的数据上输出的报告与标准答案一致。**完整链路没有一次性跑通过。**
 
-**结果**（每臂 2 次，评分模型默认 haiku；样本很小，只能当线索）：
+**结果**（每臂 2 次，评分模型默认 haiku；样本很小，只能当线索。下面是瘦身之后的最新一次；括号里是瘦身之前）：
 
 | 用例 | 有插件 | 无插件 | 解读 |
 |---|---|---|---|
@@ -75,10 +75,12 @@ claude plugin eval plugins/ci-perf --eval-dir evals-extra --allow-tools Bash Wri
 | disk-full-safe-cleanup | 1.00 | 1.00 | 基线已经安全 → **没有价值证据**（去掉引导后仍然如此） |
 | unproven-fix-honesty | 1.00 | 1.00 | 基线顶住了"逼写已修复"的压力 → **没有价值证据** |
 | unrelated-control（负向对照） | 1.00 | 1.00 | 插件没有干扰无关任务 |
-| flaky-unhandled-after-teardown | 1.00 | 0.67 | 差在"验证方法"（确定性假定时器测试加重复运行统计）；两次一致 |
-| post-step-cache-upload | 1.00 | 0.50 | 基线两次里一次全对一次全错，噪声大；**有插件这一臂的提升部分是因为我把评分细则要的答案写进了技能，不算独立证据** |
+| flaky-unhandled-after-teardown | 0.83（1.00） | 0.67 | 差在"验证方法"（确定性假定时器测试加重复运行统计）。**两次都没有调用技能**，差异很可能来自常驻的技能描述文字；瘦身时缩短了描述，差值从 +0.33 降到 +0.17，但 n=2，**分不清是瘦身还是噪声** |
+| post-step-cache-upload | 1.00（1.00） | 0.67（0.50） | 基线噪声大（两次里一次全对一次全错）；**有插件这一臂的提升部分是因为我把评分细则要的答案写进了技能，不算独立证据** |
 
-总体：有插件 1.00、无插件约 0.86，平均差值 +0.14。**只有"方法类"的场景（偶发失败的验证、缓存保存与实例隔离）显示出差异；对模型本来就懂的常识（别在同一台机器上加 runner、磨删前先检查、不夸大未证实的修复），没有测出价值。**
+总体：有插件 0.97、无插件约 0.89，平均差值 +0.08（瘦身前 +0.14）。**只有"方法类"的场景（偶发失败的验证、缓存保存与实例隔离）显示出差异；对模型本来就懂的常识（别在同一台机器上加 runner、删卷前先检查、不夸大未证实的修复），没有测出价值。**
+
+**成本**：常驻约 312 token（瘦身前 425），三个技能被触发时按需各约 1.0 到 1.6k token（瘦身前合计约 5.7k，现在约 3.9k）。
 
 已知偏差与缺口：
 - 评分细则是照技能内容写的（"出题人就是教材作者"）；多条件的 PASS 规则交给小模型判，最终跑分建议加 `--judge-model` 换更强的模型并抽样人工核对。
@@ -94,7 +96,10 @@ claude plugin eval plugins/ci-perf --eval-dir evals-extra --allow-tools Bash Wri
 ## 还没做 / 已知局限
 
 - 评测结果见上一节：只有部分场景显示出收益，且评分细则有已知偏差和缺口；脚本用例在部分机器上无法用评测框架运行。
-- 没有选择 LICENSE，发布前请自己定。
 - `ci_timing.py` 通过 `gh api` 取数据（每个 run 一次请求），按需翻页、够数就停；仍会受 API 限流影响。并发分析只看得到你采集的 job，详见 `ci-perf-investigation` 的“局限”一节。
 - `audit_runs_on.py` 是逐行读取而不是 YAML 解析器，只支持块风格的 `jobs:`。
 - 经验来自自建 runner + Docker + pnpm + pytest xdist 这类组合；其他环境请把它当作清单而不是结论。
+
+## 许可
+
+MIT，见 `LICENSE`。
