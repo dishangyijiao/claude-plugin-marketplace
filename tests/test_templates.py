@@ -216,6 +216,9 @@ class TemplateYamlTests(unittest.TestCase):
         checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout@"))
         self.assertIs(checkout["with"]["persist-credentials"], False)
 
+    def test_the_test_command_is_documented_as_a_single_line(self):
+        self.assertRegex(REPEAT.read_text().split("name: repeat tests")[0], r"__TEST_COMMAND__[^\n]*single line|single line[^\n]*__TEST_COMMAND__")
+
 
 if __name__ == "__main__":
     unittest.main()
