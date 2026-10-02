@@ -48,6 +48,36 @@ claude plugin validate plugins/ci-perf/skills
 
 `tests/test_repo_hygiene.py` 会拦截：内网 IP、令牌、密钥、个人邮箱、项目/主机名，以及审计模板里的任何删除类命令。**往这个仓库加内容之前先想：它是否通用、是否只读。**
 
+## 评测（`claude plugin eval`）
+
+6 个用例在 `plugins/ci-perf/evals/`，每个都自带数据（只允许 `Skill` 工具，不读文件、不联网），由 LLM 评分细则打分，并自动跑一个**不装插件的基线臂**做对照。
+
+```bash
+claude plugin eval plugins/ci-perf --runs 2 -j 2 --trust-plugin --no-publish --max-cost-usd 4
+```
+
+- 会用你自己的凭据起子进程；24 次运行约 5 到 6 分钟、约 2.3 美元。`--no-publish` 让报告只留在本地，不发布到 claude.ai。
+- `--trust-plugin` 只对你自己写的插件用。结果在 `evals/results/`（已被 `.gitignore` 排除）。
+
+**第一次结果**（每臂 2 次，评分模型默认 haiku；样本很小，只能当线索）：
+
+| 用例 | 有插件 | 无插件 | 解读 |
+|---|---|---|---|
+| contention-diagnosis | 1.00 | 1.00 | 基线已经会，**不能证明价值** |
+| disk-full-safe-cleanup | 1.00 | 1.00 | 基线已经安全；提示太有引导性，**不能证明价值** |
+| unproven-fix-honesty | 1.00 | 1.00 | 基线本来就诚实，**不能证明价值** |
+| unrelated-control（负向对照） | 1.00 | 1.00 | 插件没有干扰无关任务 |
+| flaky-unhandled-after-teardown | 1.00 | 0.67 | 差在"验证方法"一项；有插件那臂**没有调用技能**，差异很可能来自常驻的技能描述文字，是推断 |
+| post-step-cache-upload | 0.67 | 0.00 | 差在"诊断和方案"一项，调用了技能；但"验证方法"一项两臂都没过（技能里没写这条，见下） |
+
+总体：有插件 0.94、无插件 0.78。**这只说明在 2 个场景里有迹象表明有帮助，不足以证明整体价值。**
+
+已知偏差与缺口：
+- 评分细则是照技能内容写的，存在"出题人就是教材作者"的偏差；多条件的 PASS 规则交给小模型判，最终跑分建议加 `--judge-model` 换更强的模型并抽样人工核对。
+- `post-step-cache-upload` 的"验证"细则要求"首次在某个 runner 上存储是空的，热存储的收益要第二次才看得到"，**技能里目前没有这条**，需要补进技能或删掉细则。
+- 评测只测"建议"，**没有任何用例让代理真的运行脚本或模板**；也没有判定"技能是否被触发"。
+- `contention-diagnosis` 的细则第 4 条与提示冲突（提示已说明宿主机有空闲 CPU）。
+
 ## 发布
 
 1. 在 GitHub 上建仓库 `claude-plugin-marketplace` 并推送。
@@ -56,7 +86,8 @@ claude plugin validate plugins/ci-perf/skills
 
 ## 还没做 / 已知局限
 
-- 没有 `evals/`：可以用 `claude plugin eval` 对比"有插件 vs 无插件"来验证技能是否真的让排查更快，建议补上。
+- 评测结果见上一节：只有部分场景显示出收益，且评分细则有已知偏差和缺口。
+- **技能里引用脚本和模板用的是裸相对路径，插件安装后在用户项目目录里找不到文件**，需要改成 `${CLAUDE_PLUGIN_ROOT}/...`（`/cc-suite:audit-nlp` 审计发现，尚未修复）。
 - 没有选择 LICENSE，发布前请自己定。
 - `ci_timing.py` 通过 `gh api` 取数据（每个 run 一次请求），按需翻页、够数就停；仍会受 API 限流影响。并发分析只看得到你采集的 job，详见 `ci-perf-investigation` 的“局限”一节。
 - `audit_runs_on.py` 是逐行读取而不是 YAML 解析器，只支持块风格的 `jobs:`。
