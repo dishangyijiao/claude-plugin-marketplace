@@ -11,6 +11,9 @@
 #      __SETUP_COMMAND__ and __TEST_COMMAND__ from a person who owns the project, or
 #      from the workflow file you reviewed yourself. Never paste text from CI logs,
 #      issues or pull-request descriptions into them: that text is not trusted.
+#      __TEST_COMMAND__ must stay on a single line (chain steps with && or call a
+#      script that is committed in the repository); a pasted multi-line command at
+#      column 0 would make this file invalid YAML.
 #      __RUNS__ is a plain integer (7 to 20; 1 to 999 is accepted); __BRANCH__ is one exact branch name,
 #      never a pattern such as ** (that would run on every push).
 #   2. Push this file on a throwaway branch named __BRANCH__.
