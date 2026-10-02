@@ -3,6 +3,8 @@
 import io
 import json
 import runpy
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -420,6 +422,129 @@ class CliInputValidationTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as caught:
                     ci_timing.main(["report", str(path)])
             self.assertIn("cannot read", str(caught.exception), content)
+
+
+class ListArgumentTests(unittest.TestCase):
+    """--events/--steps/--heavy take comma lists; real job names contain commas and spaces."""
+
+    def report_cli(self, runs, *args):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runs.json"
+            path.write_text(json.dumps({"runs": runs}))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                ci_timing.main(["report", str(path), *args])
+        return out.getvalue()
+
+    def test_commas_inside_parentheses_belong_to_the_job_name(self):
+        runs = [{"id": 1, "jobs": [job("build (ubuntu, 3.11)", 0, 10, 100, "a"), job("build (macos, 3.11)", 0, 20, 90, "b")]}]
+        text = self.report_cli(runs, "--overlap-target", "build (ubuntu, 3.11)", "--heavy", "build (macos, 3.11)")
+        self.assertIn("1 neighbours", text)
+
+    def test_spaces_around_list_items_are_ignored(self):
+        runs = [{"id": 1, "jobs": [job("t", 0, 10, 100, "a"), job("x", 0, 20, 90, "b"), job("y", 0, 30, 80, "c")]}]
+        text = self.report_cli(runs, "--overlap-target", "t", "--heavy", "x, y")
+        self.assertIn("2 neighbours", text)
+
+    def test_events_list_tolerates_spaces(self):
+        def gh(path, jq):
+            if "/jobs" in path:
+                return []
+            return [{"id": 1, "event": "push", "conclusion": "success", "created_at": ts(0)},
+                    {"id": 2, "event": "pull_request", "conclusion": "success", "created_at": ts(0)}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "runs.json"
+            with mock.patch.object(ci_timing, "_gh_lines", gh), redirect_stdout(io.StringIO()):
+                ci_timing.main(["collect", "--repo", "o/r", "--workflow", "ci.yml", "--since", "2026-01-01", "--events", "pull_request, push", "--out", str(out_path)])
+            self.assertEqual(len(json.loads(out_path.read_text())["runs"]), 2)
+
+
+class UnknownNameTests(unittest.TestCase):
+    runs = [{"id": 1, "event": "push", "jobs": [job("unit", 0, 10, 70, steps=[step("tests", 10, 70)])]}]
+
+    def test_a_steps_job_that_does_not_exist_says_so(self):
+        self.assertIn("no data", ci_timing.report(self.runs, steps=["untit"]).lower())
+
+    def test_an_overlap_target_that_does_not_exist_says_so(self):
+        self.assertIn("no data", ci_timing.report(self.runs, overlap_target="untit").lower())
+
+
+class DamagedInputTests(unittest.TestCase):
+    def test_nameless_jobs_and_unparseable_timestamps_are_skipped_and_counted(self):
+        nameless = {"conclusion": "success", "created_at": ts(0), "started_at": ts(1), "completed_at": ts(2)}
+        garbled = {"name": "bad", "conclusion": "success", "created_at": "yesterday", "started_at": ts(1), "completed_at": ts(2)}
+        runs = [{"id": 1, "event": "push", "jobs": [nameless, garbled, job("ok", 0, 10, 70, steps=[step("s", 10, 70)])]}]
+        text = ci_timing.report(runs, check="ok", steps=["ok"], overlap_target="ok", heavy=["ok"])
+        self.assertIn("2 job(s) skipped", text)
+        self.assertIn("ok", text)
+
+    def test_runs_seen_in_several_files_are_counted_once(self):
+        runs = [{"id": 11, "event": "push", "jobs": [job("unit", 0, 10, 70)]}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runs.json"
+            path.write_text(json.dumps({"runs": runs}))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                ci_timing.main(["report", str(path), str(path)])
+        self.assertTrue(out.getvalue().startswith("1 runs"), out.getvalue()[:40])
+
+
+class CollectBoundaryTests(unittest.TestCase):
+    sample_run = {"id": 1, "event": "push", "conclusion": "success", "created_at": ts(0)}
+
+    def test_jobs_are_read_page_by_page_until_a_short_page(self):
+        from urllib.parse import parse_qs, urlparse
+
+        job_pages = []
+
+        def gh(path, jq):
+            if "/jobs" not in path:
+                return [self.sample_run]
+            page = int(parse_qs(urlparse(path).query).get("page", ["1"])[0])
+            job_pages.append(page)
+            count = 100 if page == 1 else 5
+            return [job(f"j{page}-{i}", 0, 1, 2) for i in range(count)]
+
+        runs = ci_timing.collect("o/r", "ci.yml", "2026-01-01", limit=1, events=set(), fetch=gh)
+        self.assertEqual(len(runs[0]["jobs"]), 105)
+        self.assertEqual(job_pages, [1, 2])
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+    def test_the_job_filter_survives_jobs_whose_steps_are_null_or_missing(self):
+        seen = {}
+
+        def gh(path, jq):
+            if "/jobs" in path:
+                seen["jq"] = jq
+                return []
+            return [self.sample_run]
+
+        ci_timing.collect("o/r", "ci.yml", "2026-01-01", limit=1, events=set(), fetch=gh)
+        for doc in ({"jobs": [{"name": "a", "steps": None}]}, {"jobs": [{"name": "a"}]}):
+            proc = subprocess.run(["jq", "-c", seen["jq"]], input=json.dumps(doc), capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_a_since_date_that_is_not_a_calendar_date_is_rejected_before_any_request(self):
+        def gh(path, jq):
+            raise AssertionError("must not call the API")
+
+        for bad in ("yesterday", "2026-13-01", "2026-1-1", "2026-01-01T00:00:00Z", ""):
+            with self.assertRaises(SystemExit, msg=bad):
+                ci_timing.collect("o/r", "ci.yml", bad, limit=1, events=set(), fetch=gh)
+
+
+class NonUtf8EnvironmentTests(unittest.TestCase):
+    """Job names may be Chinese; the interpreter may be running with an ASCII locale."""
+
+    def test_report_survives_non_ascii_names_with_ascii_streams(self):
+        runs = [{"id": 1, "event": "push", "jobs": [job("构建", 0, 10, 70, steps=[step("测试", 10, 70)])]}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runs.json"
+            path.write_text(json.dumps({"runs": runs}), encoding="utf-8")
+            env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "PYTHONIOENCODING": "ascii", "PYTHONUTF8": "0"}
+            proc = subprocess.run([sys.executable, "-X", "utf8=0", str(SCRIPT), "report", str(path), "--steps", "构建"], capture_output=True, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace"))
 
 
 class ScriptEntryPointTests(unittest.TestCase):
