@@ -49,7 +49,20 @@ def _seconds(start: str, end: str) -> float:
 
 
 def _finished(job) -> bool:
+    """A job that really ran: finished with success/failure and has start/end times."""
     return bool(job.get("started_at") and job.get("completed_at") and job.get("conclusion") in FINISHED)
+
+
+def _valid(job) -> bool:
+    """Finished, and its timestamps are present and consistent (no clock skew)."""
+    if not _finished(job) or not job.get("created_at"):
+        return False
+    return _seconds(job["created_at"], job["started_at"]) >= 0 and _seconds(job["started_at"], job["completed_at"]) >= 0
+
+
+def invalid_job_count(runs) -> int:
+    """Finished jobs dropped from every statistic because their timestamps are unusable."""
+    return sum(1 for run in runs for job in run.get("jobs", []) if _finished(job) and not _valid(job))
 
 
 def job_stats(runs):
@@ -57,7 +70,7 @@ def job_stats(runs):
     groups: dict[str, list[dict]] = {}
     for run in runs:
         for job in run.get("jobs", []):
-            if _finished(job):
+            if _valid(job):
                 groups.setdefault(job["name"], []).append(job)
     stats = {}
     for name, jobs in groups.items():
@@ -92,9 +105,9 @@ def step_stats(runs, job_name, top=10):
 
 def time_to_check(run, check_name):
     """Seconds from the run's first job being created to `check_name` completing."""
-    jobs = run.get("jobs", [])
+    jobs = [j for j in run.get("jobs", []) if j.get("created_at")]
     # A skipped check (e.g. a draft pull request) has timestamps but no real duration.
-    check = [j for j in jobs if j["name"] == check_name and _finished(j)]
+    check = [j for j in jobs if j["name"] == check_name and _valid(j)]
     if not check:
         return None
     first = min(parse_ts(j["created_at"]) for j in jobs)
@@ -112,7 +125,7 @@ def overlap_buckets(runs, heavy_names, target_name):
         j
         for run in runs
         for j in run.get("jobs", [])
-        if j["name"] in heavy_names and _finished(j)  # skipped/cancelled jobs are not real load
+        if j["name"] in heavy_names and _valid(j)  # skipped/cancelled/skewed jobs are not real load
     ]
     buckets: dict[int, list[float]] = {}
     for target in heavy:
@@ -121,7 +134,8 @@ def overlap_buckets(runs, heavy_names, target_name):
         t0, t1 = parse_ts(target["started_at"]), parse_ts(target["completed_at"])
         neighbours = 0
         for other in heavy:
-            if other is target or other.get("runner_name") == target.get("runner_name"):
+            same_runner = target.get("runner_name") is not None and other.get("runner_name") == target.get("runner_name")
+            if other is target or same_runner:  # an unknown runner name is not proof of the same runner
                 continue
             if parse_ts(other["started_at"]) < t1 and parse_ts(other["completed_at"]) > t0:
                 neighbours += 1
@@ -133,28 +147,37 @@ def overlap_buckets(runs, heavy_names, target_name):
 
 
 def _gh_lines(path: str, jq: str):
-    proc = subprocess.run(
-        ["gh", "api", "--paginate", path, "--jq", jq],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = subprocess.run(["gh", "api", path, "--jq", jq], capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise SystemExit(f"gh api failed for {path}: {proc.stderr.strip()[:300]}")
     return [json.loads(line) for line in proc.stdout.splitlines() if line.strip().startswith("{")]
 
 
-def collect(repo, workflow, since, limit, events):
+def collect(repo, workflow, since, limit, events, fetch=None):
+    """Newest `limit` runs (filtered by event) with their jobs and steps.
+
+    Pages are requested one at a time and the loop stops as soon as enough runs
+    were found, so a small --limit on a busy repository stays cheap. Jobs are read
+    with per_page=100, which covers every job of a normal workflow.
+    """
+    fetch = fetch or _gh_lines
     created = urllib.parse.quote(f">={since}", safe="")
-    runs_path = f"repos/{repo}/actions/workflows/{workflow}/runs?per_page=100&created={created}"
-    runs = _gh_lines(runs_path, ".workflow_runs[]|{id,event,conclusion,created_at,head_branch}")
-    runs = [r for r in runs if not events or r["event"] in events][:limit]
+    runs: list[dict] = []
+    page = 1
+    while len(runs) < limit:
+        path = f"repos/{repo}/actions/workflows/{workflow}/runs?per_page=100&page={page}&created={created}"
+        batch = fetch(path, ".workflow_runs[]|{id,event,conclusion,created_at,head_branch}")
+        runs += [r for r in batch if not events or r["event"] in events]
+        if len(batch) < 100:
+            break
+        page += 1
+    runs = runs[:limit]
     jq_jobs = (
         ".jobs[]|{name,conclusion,runner_name,created_at,started_at,completed_at,"
         "steps:[.steps[]|{name,conclusion,started_at,completed_at}]}"
     )
     for run in runs:
-        run["jobs"] = _gh_lines(f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100", jq_jobs)
+        run["jobs"] = fetch(f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100", jq_jobs)
     return runs
 
 
@@ -163,7 +186,11 @@ def _fmt(seconds):
 
 
 def report(runs, check=None, steps=(), overlap_target=None, heavy=()):
-    lines = [f"{len(runs)} runs\n", "== Jobs (queue = waiting for a runner, run = executing)"]
+    dropped = invalid_job_count(runs)
+    header = f"{len(runs)} runs"
+    if dropped:
+        header += f" ({dropped} job(s) skipped: missing or inconsistent timestamps, e.g. runner clock skew)"
+    lines = [header + "\n", "== Jobs (queue = waiting for a runner, run = executing)"]
     lines.append(f"{'job':34s} {'n':>4s} {'fail':>4s} {'queue med':>10s} {'queue p90':>10s} {'run med':>9s} {'run p90':>9s} {'run max':>9s}")
     for name, s in sorted(job_stats(runs).items(), key=lambda kv: -kv[1]["run_med"]):
         lines.append(

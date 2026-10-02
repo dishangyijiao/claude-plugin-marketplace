@@ -65,6 +65,55 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual([j["job"] for j in audit_runs_on.classify_workflow(text)], ["a"])
 
 
+class IndentationTests(unittest.TestCase):
+    """Real workflow files are not always indented with 2 spaces."""
+
+    def test_four_space_indentation(self):
+        text = "jobs:\n    lint:\n        runs-on: ubuntu-latest\n        steps:\n            - run: x\n"
+        rows = audit_runs_on.classify_workflow(text)
+        self.assertEqual([(r["job"], r["kind"]) for r in rows], [("lint", "github-hosted")])
+
+    def test_four_space_block_runs_on(self):
+        text = "jobs:\n    build:\n        runs-on:\n            group: ci\n            labels: [self-hosted]\n"
+        self.assertEqual(audit_runs_on.classify_workflow(text)[0]["kind"], "self-hosted")
+
+    def test_comments_and_blank_lines_after_jobs(self):
+        text = "jobs:\n\n  # a comment\n  a:\n    # runs-on: ubuntu-latest\n    runs-on: [self-hosted]\n"
+        rows = audit_runs_on.classify_workflow(text)
+        self.assertEqual([(r["job"], r["kind"]) for r in rows], [("a", "self-hosted")])
+
+    def test_nested_runs_on_in_a_step_is_not_the_job_runner(self):
+        text = "jobs:\n  a:\n    runs-on: [self-hosted]\n    steps:\n      - run: echo\n        env:\n          runs-on: ubuntu-latest\n"
+        self.assertEqual(audit_runs_on.classify_workflow(text)[0]["kind"], "self-hosted")
+
+
+class MainMessageTests(unittest.TestCase):
+    def run_main(self, repo):
+        import io
+        from contextlib import redirect_stdout
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = audit_runs_on.main([str(repo)])
+        return code, out.getvalue()
+
+    def test_no_workflows_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, text = self.run_main(tmp)
+        self.assertEqual(code, 1)
+        self.assertIn("no workflow files", text)
+
+    def test_files_found_but_no_jobs_parsed_is_not_reported_as_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "odd.yml").write_text("name: odd\non: push\njobs: {a: {runs-on: ubuntu-latest}}\n")  # flow style
+            code, text = self.run_main(tmp)
+        self.assertEqual(code, 2)
+        self.assertIn("1 workflow file", text)
+        self.assertIn("0 jobs", text)
+
+
 class AuditDirTests(unittest.TestCase):
     def test_directory_audit_flags_hosted_jobs(self):
         with tempfile.TemporaryDirectory() as tmp:

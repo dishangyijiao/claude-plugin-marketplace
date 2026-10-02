@@ -58,5 +58,6 @@ claude plugin validate plugins/ci-perf/skills
 
 - 没有 `evals/`：可以用 `claude plugin eval` 对比"有插件 vs 无插件"来验证技能是否真的让排查更快，建议补上。
 - 没有选择 LICENSE，发布前请自己定。
-- `ci_timing.py` 通过 `gh api` 取数据：大仓库、大时间范围会比较慢，并受 API 限流影响。
+- `ci_timing.py` 通过 `gh api` 取数据（每个 run 一次请求），按需翻页、够数就停；仍会受 API 限流影响。并发分析只看得到你采集的 job，详见 `ci-perf-investigation` 的“局限”一节。
+- `audit_runs_on.py` 是逐行读取而不是 YAML 解析器，只支持块风格的 `jobs:`。
 - 经验来自自建 runner + Docker + pnpm + pytest xdist 这类组合；其他环境请把它当作清单而不是结论。

@@ -157,6 +157,56 @@ class OverlapTests(unittest.TestCase):
         self.assertEqual(buckets, {1: [100]})
 
 
+class RobustnessTests(unittest.TestCase):
+    def test_job_without_created_at_is_skipped_not_a_crash(self):
+        bad = job("x", 0, 5, 10)
+        del bad["created_at"]
+        runs = [{"id": 1, "jobs": [bad, job("x", 0, 5, 65)]}]
+        self.assertEqual(ci_timing.job_stats(runs)["x"]["n"], 1)
+
+    def test_negative_duration_from_clock_skew_is_dropped_and_counted(self):
+        skewed = job("x", 0, 50, 30)  # completed before it started
+        runs = [{"id": 1, "jobs": [skewed, job("x", 0, 5, 65)]}]
+        self.assertEqual(ci_timing.job_stats(runs)["x"]["n"], 1)
+        self.assertEqual(ci_timing.invalid_job_count(runs), 1)
+
+    def test_report_mentions_dropped_jobs(self):
+        runs = [{"id": 1, "jobs": [job("x", 0, 50, 30), job("x", 0, 5, 65)]}]
+        self.assertIn("1 job", ci_timing.report(runs))
+
+    def test_missing_runner_names_are_never_the_same_runner(self):
+        runs = [{"id": 1, "jobs": [job("x", 0, 0, 100, runner=None), job("x", 0, 50, 150, runner=None)]}]
+        buckets = ci_timing.overlap_buckets(runs, {"x"}, "x")
+        self.assertEqual(sorted(buckets), [1])  # each saw the other: unknown runner is not proof of the same runner
+
+
+class CollectPagingTests(unittest.TestCase):
+    def test_stops_fetching_once_the_limit_is_reached(self):
+        calls = []
+
+        def fake_fetch(path, jq):
+            calls.append(path)
+            if "/jobs" in path:
+                return []
+            page = int(path.split("page=")[1].split("&")[0]) if "page=" in path else 1
+            return [{"id": page * 1000 + i, "event": "push", "conclusion": "success", "created_at": ts(0), "head_branch": "b"} for i in range(100)]
+
+        runs = ci_timing.collect("o/r", "ci.yml", "2026-01-01", limit=120, events={"push"}, fetch=fake_fetch)
+        run_pages = [c for c in calls if "/jobs" not in c]
+        self.assertEqual(len(runs), 120)
+        self.assertEqual(len(run_pages), 2)  # 200 runs were enough; page 3 must not be requested
+
+    def test_filters_events_before_applying_the_limit(self):
+        def fake_fetch(path, jq):
+            if "/jobs" in path:
+                return []
+            return [{"id": i, "event": "push" if i % 2 else "schedule", "conclusion": "success", "created_at": ts(0), "head_branch": "b"} for i in range(10)]
+
+        runs = ci_timing.collect("o/r", "ci.yml", "2026-01-01", limit=3, events={"push"}, fetch=fake_fetch)
+        self.assertEqual({r["event"] for r in runs}, {"push"})
+        self.assertEqual(len(runs), 3)
+
+
 class ReportTests(unittest.TestCase):
     def test_report_cli_prints_job_table(self):
         runs = [{"id": 1, "event": "pull_request", "jobs": [job("unit", 0, 10, 70, steps=[step("tests", 10, 70)])]}]
