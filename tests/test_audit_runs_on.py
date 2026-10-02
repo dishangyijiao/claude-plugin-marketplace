@@ -294,5 +294,110 @@ class AuditDirTests(unittest.TestCase):
         self.assertTrue(all(r["file"] == "ci.yml" for r in rows))
 
 
+class KindClassificationTests(unittest.TestCase):
+    def kinds(self, runs_on):
+        rows = audit_runs_on.classify_workflow(f"jobs:\n  a:\n    runs-on: {runs_on}\n")
+        return rows[0]["kind"]
+
+    def test_each_runner_value_maps_to_exactly_one_kind(self):
+        cases = {
+            "ubuntu-latest": "github-hosted",
+            "macos-14": "github-hosted",
+            "windows-2022": "github-hosted",
+            "self-hosted": "self-hosted",
+            "[self-hosted, linux]": "self-hosted",
+            "{group: big-runners}": "self-hosted",
+            "my-custom-label": "dynamic",
+            "ubuntu-${{ matrix.version }}": "dynamic",
+            "[self-hosted, ${{ matrix.os }}]": "dynamic",
+            "${{ matrix.os }}": "dynamic",
+        }
+        for value, kind in cases.items():
+            with self.subTest(runs_on=value):
+                self.assertEqual(self.kinds(value), kind)
+
+
+class RowShapeTests(unittest.TestCase):
+    def test_rows_have_exactly_job_kind_and_value(self):
+        text = "jobs:\n  a:\n    runs-on: ubuntu-latest\n  b:\n    uses: ./.github/workflows/x.yml\n  c:\n    name: no runner\n"
+        self.assertEqual(audit_runs_on.classify_workflow(text), [
+            {"job": "a", "kind": "github-hosted", "value": "ubuntu-latest"},
+            {"job": "b", "kind": "reusable", "value": "./.github/workflows/x.yml"},
+            {"job": "c", "kind": "dynamic", "value": ""},
+        ])
+
+    def test_a_job_with_only_a_comment_after_its_key_has_an_empty_value(self):
+        self.assertEqual(audit_runs_on.classify_workflow("jobs:\n  a: # later\n"), [{"job": "a", "kind": "dynamic", "value": ""}])
+
+    def test_quotes_around_an_inline_runs_on_are_removed(self):
+        for source in ('{runs-on: "ubuntu-latest"}', "{runs-on: 'ubuntu-latest'}"):
+            with self.subTest(source=source):
+                rows = audit_runs_on.classify_workflow(f"jobs:\n  a: {source}\n")
+                self.assertEqual(rows, [{"job": "a", "kind": "github-hosted", "value": "ubuntu-latest"}])
+
+    def test_a_value_that_repeats_the_key_is_kept_whole(self):
+        rows = audit_runs_on.classify_workflow("jobs:\n  a:\n    uses: ./w/uses:y.yml\n  b:\n    runs-on: x runs-on: y\n")
+        self.assertEqual([r["value"] for r in rows], ["./w/uses:y.yml", "x runs-on: y"])
+
+    def test_block_sequences_are_joined_with_single_spaces_and_may_follow_a_comment(self):
+        text = "jobs:\n  a:\n    runs-on: # which runner\n      - self-hosted\n      - linux\n"
+        self.assertEqual(audit_runs_on.classify_workflow(text), [{"job": "a", "kind": "self-hosted", "value": "- self-hosted - linux"}])
+
+
+class LayoutTolerance(unittest.TestCase):
+    def test_a_comment_in_column_zero_does_not_end_the_jobs_section(self):
+        text = "jobs:\n  a:\n    runs-on: ubuntu-latest\n# note\n  b:\n    runs-on: self-hosted\n"
+        self.assertEqual([r["job"] for r in audit_runs_on.classify_workflow(text)], ["a", "b"])
+
+    def test_windows_line_endings_leave_no_carriage_returns_in_values(self):
+        text = "jobs:\r\n  a:\r\n    runs-on: ubuntu-latest\r\n  b:\r\n    runs-on:\r\n      - self-hosted\r\n"
+        rows = audit_runs_on.classify_workflow(text)
+        self.assertEqual([(r["job"], r["kind"], r["value"]) for r in rows], [("a", "github-hosted", "ubuntu-latest"), ("b", "self-hosted", "- self-hosted")])
+
+
+class SanitizerAndSizeTests(unittest.TestCase):
+    def test_every_unsafe_category_is_replaced(self):
+        self.assertEqual(audit_runs_on._printable("a\x1bb\u202ec\u2028d\u2029e\ud800f\ue000g\u0378h", 40), "a?b?c?d?e?f?g?h")
+
+    def write_workflow(self, root, name, size):
+        wf = Path(root) / ".github" / "workflows"
+        wf.mkdir(parents=True, exist_ok=True)
+        head = "jobs:\n  a:\n    runs-on: ubuntu-latest\n#"
+        (wf / name).write_text(head + "x" * (size - len(head)))
+
+    def test_the_size_limit_is_one_million_bytes_inclusive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write_workflow(tmp, "exact.yml", 1_000_000)
+            self.write_workflow(tmp, "over.yml", 1_000_001)
+            self.assertEqual([p.name for p in audit_runs_on.workflow_files(Path(tmp))], ["exact.yml"])
+
+    def test_a_file_with_invalid_utf8_is_still_audited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "a.yml").write_bytes(b"jobs:\n  a:\n    runs-on: ubuntu-latest # \xff\xfe\n")
+            rows = audit_runs_on.audit_directory(Path(tmp))
+        self.assertEqual([(r["job"], r["kind"]) for r in rows], [("a", "github-hosted")])
+
+
+class CommandLineSummaryTests(unittest.TestCase):
+    def test_short_help_flag_prints_usage(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(audit_runs_on.main(["-h"]), 0)
+        self.assertIn("audit_runs_on.py [REPO_DIR]", out.getvalue())
+
+    def test_the_summary_counts_only_github_hosted_jobs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "a.yml").write_text("jobs:\n  a:\n    runs-on: ubuntu-latest\n  b:\n    runs-on: self-hosted\n  c:\n    runs-on: self-hosted\n")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = audit_runs_on.main([tmp])
+        self.assertEqual(code, 0)
+        self.assertIn("1 of 3 jobs use GitHub-hosted runners", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

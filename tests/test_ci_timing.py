@@ -1,7 +1,9 @@
 """Tests for ci_timing.py: pure analysis functions on synthetic run data."""
 
+import argparse
 import io
 import json
+import os
 import runpy
 import shutil
 import subprocess
@@ -592,6 +594,260 @@ class ReportTests(unittest.TestCase):
         self.assertIn("unit", text)
         self.assertIn("queue", text.lower())
         self.assertIn("tests", text)
+
+
+class SanitizerBoundaryTests(unittest.TestCase):
+    def test_every_unsafe_category_is_replaced_by_a_question_mark(self):
+        for label, char in (("Cc", "\x1b"), ("Cf", "\u202e"), ("Zl", "\u2028"), ("Zp", "\u2029"),
+                            ("Cs", "\ud800"), ("Co", "\ue000"), ("Cn", "\u0378")):
+            with self.subTest(category=label):
+                self.assertEqual(ci_timing.clean(f"a{char}b"), "a?b")
+
+    def test_width_truncates_after_replacement_and_none_keeps_everything(self):
+        self.assertEqual(ci_timing.clean("x" * 100, 60), "x" * 60)
+        self.assertEqual(ci_timing.clean("abc", 2), "ab")
+        self.assertEqual(ci_timing.clean("abc"), "abc")
+        self.assertEqual(ci_timing.clean("x" * 100), "x" * 100)
+
+
+class SplitNamesBoundaryTests(unittest.TestCase):
+    def test_commas_inside_parentheses_or_brackets_do_not_split(self):
+        self.assertEqual(ci_timing.split_names("a (x, y), b"), ["a (x, y)", "b"])
+        self.assertEqual(ci_timing.split_names("a [x, y], b"), ["a [x, y]", "b"])
+        self.assertEqual(ci_timing.split_names("f((x, y)), g"), ["f((x, y))", "g"])
+        self.assertEqual(ci_timing.split_names("f((x), y), g"), ["f((x), y)", "g"])
+
+    def test_an_unbalanced_closing_bracket_does_not_swallow_later_commas(self):
+        self.assertEqual(ci_timing.split_names("a), b"), ["a)", "b"])
+        self.assertEqual(ci_timing.split_names("a], b, c"), ["a]", "b", "c"])
+
+
+class ValidateTargetBoundaryTests(unittest.TestCase):
+    def test_dot_and_dotdot_are_rejected_in_every_position(self):
+        for repo in ("./x", "x/.", "../x", "x/.."):
+            with self.subTest(repo=repo), self.assertRaises(SystemExit) as caught:
+                ci_timing.validate_target(repo, "ci.yml")
+            self.assertIn("--repo", str(caught.exception))
+        for workflow in (".", ".."):
+            with self.subTest(workflow=workflow), self.assertRaises(SystemExit) as caught:
+                ci_timing.validate_target("o/r", workflow)
+            self.assertIn("--workflow", str(caught.exception))
+
+
+class TimingBoundaryTests(unittest.TestCase):
+    def test_a_job_that_started_the_instant_it_was_created_and_ran_zero_seconds_is_valid(self):
+        runs = [{"id": 1, "jobs": [job("fast", 5, 5, 5)]}]
+        self.assertEqual(ci_timing.invalid_job_count(runs), 0)
+        self.assertEqual(ci_timing.job_stats(runs)["fast"]["n"], 1)
+
+    def test_a_job_that_started_before_it_was_created_or_finished_before_it_started_is_invalid(self):
+        runs = [{"id": 1, "jobs": [job("skew1", 5, 4, 9), job("skew2", 5, 6, 5)]}]
+        self.assertEqual(ci_timing.invalid_job_count(runs), 2)
+
+    def test_percentile_uses_the_exact_nearest_rank_formula(self):
+        values = list(range(1, 102))
+        self.assertEqual(ci_timing.percentile(values, 50), 51)
+        self.assertEqual(ci_timing.percentile(values, 90), 91)
+
+    def test_percentile_zero_is_the_smallest_value_not_the_largest(self):
+        self.assertEqual(ci_timing.percentile([7, 3, 9], 0), 3)
+
+
+class JobStatsFieldTests(unittest.TestCase):
+    def test_every_statistic_of_a_job_is_computed_from_the_right_field(self):
+        jobs = [job("a", 0, q, q + q * 10, conclusion="failure" if q == 3 else "success") for q in range(1, 11)]
+        stats = ci_timing.job_stats([{"id": 1, "jobs": jobs}])["a"]
+        self.assertEqual(stats["n"], 10)
+        self.assertEqual(stats["failed"], 1)
+        self.assertEqual(stats["queue_med"], 5.5)
+        self.assertEqual(stats["queue_p90"], 9)
+        self.assertEqual(stats["run_med"], 55.0)
+        self.assertEqual(stats["run_p90"], 90)
+        self.assertEqual(stats["run_max"], 100)
+
+
+class StepStatsBoundaryTests(unittest.TestCase):
+    def runs_with_steps(self, steps):
+        return [{"id": 1, "jobs": [job("build", 0, 0, 100, steps=steps)]}]
+
+    def test_the_result_is_capped_at_top_and_the_default_is_ten(self):
+        runs = self.runs_with_steps([step(f"s{i}", 0, i + 1) for i in range(12)])
+        self.assertEqual(len(ci_timing.step_stats(runs, "build")), 10)
+        self.assertEqual(len(ci_timing.step_stats(runs, "build", top=3)), 3)
+
+    def test_steps_are_ordered_by_median_not_by_max(self):
+        runs = [{"id": i, "jobs": [job("build", 0, 0, 200, steps=[step("steady", 0, 10), step("spiky", 0, d)])]} for i, d in enumerate((1, 5, 100))]
+        self.assertEqual([row[0] for row in ci_timing.step_stats(runs, "build")], ["steady", "spiky"])
+
+    def test_a_step_missing_either_timestamp_is_skipped_not_fatal(self):
+        half_start = {"name": "half-start", "started_at": ts(0), "completed_at": None}
+        half_end = {"name": "half-end", "started_at": None, "completed_at": ts(9)}
+        rows = ci_timing.step_stats(self.runs_with_steps([half_start, half_end, step("whole", 0, 4)]), "build")
+        self.assertEqual([row[0] for row in rows], ["whole"])
+
+
+class OverlapBoundaryTests(unittest.TestCase):
+    def test_jobs_that_only_touch_end_to_start_are_not_neighbours(self):
+        target = job("A", 0, 10, 20, runner="r1")
+        for other in (job("B", 0, 0, 10, runner="r2"), job("B", 0, 20, 30, runner="r2")):
+            with self.subTest(other=other["started_at"]):
+                buckets = ci_timing.overlap_buckets([{"id": 1, "jobs": [target, other]}], {"A", "B"}, "A")
+                self.assertEqual(buckets, {0: [10.0]})
+
+    def test_a_job_overlapping_by_one_second_is_a_neighbour(self):
+        target = job("A", 0, 10, 20, runner="r1")
+        buckets = ci_timing.overlap_buckets([{"id": 1, "jobs": [target, job("B", 0, 19, 30, runner="r2")]}], {"A", "B"}, "A")
+        self.assertEqual(buckets, {1: [10.0]})
+
+
+class CollectPaginationTests(unittest.TestCase):
+    def run_collect(self, limit, runs_per_page):
+        from urllib.parse import parse_qs, urlparse
+
+        run_pages = []
+
+        def gh(path, jq):
+            if "/jobs" in path:
+                return []
+            page = int(parse_qs(urlparse(path).query)["page"][0])
+            run_pages.append(page)
+            n = runs_per_page.get(page, 0)
+            return [{"id": page * 1000 + i, "event": "push", "conclusion": "success", "created_at": ts(0)} for i in range(n)]
+
+        runs = ci_timing.collect("o/r", "ci.yml", "2026-01-01", limit=limit, events=set(), fetch=gh)
+        return runs, run_pages
+
+    def test_the_first_request_asks_for_page_one(self):
+        _, pages = self.run_collect(5, {1: 3})
+        self.assertEqual(pages, [1])
+
+    def test_a_full_page_that_already_satisfies_the_limit_ends_the_search(self):
+        runs, pages = self.run_collect(100, {1: 100, 2: 100})
+        self.assertEqual(pages, [1])
+        self.assertEqual(len(runs), 100)
+
+    def test_pages_are_walked_one_by_one_until_a_short_page(self):
+        runs, pages = self.run_collect(150, {1: 100, 2: 30, 3: 100})
+        self.assertEqual(pages, [1, 2])
+        self.assertEqual(len(runs), 130)
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+    def test_the_run_filter_keeps_exactly_the_four_fields(self):
+        seen = {}
+
+        def gh(path, jq):
+            seen.setdefault("jq", jq)
+            return []
+
+        ci_timing.collect("o/r", "ci.yml", "2026-01-01", limit=1, events=set(), fetch=gh)
+        doc = {"workflow_runs": [{"id": 1, "event": "push", "conclusion": "success", "created_at": "t", "extra": "x"}]}
+        proc = subprocess.run(["jq", "-c", seen["jq"]], input=json.dumps(doc), capture_output=True, text=True)
+        self.assertEqual(json.loads(proc.stdout), {"id": 1, "event": "push", "conclusion": "success", "created_at": "t"})
+
+
+class RealGhProcessTests(unittest.TestCase):
+    """_gh_lines against a real executable named gh, so subprocess options are exercised."""
+
+    def with_fake_gh(self, body):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        gh = Path(tmp.name, "gh")
+        gh.write_text("#!/bin/sh\n" + body)
+        gh.chmod(0o755)
+        return mock.patch.dict(os.environ, {"PATH": f"{tmp.name}:{os.environ['PATH']}"})
+
+    def test_json_lines_are_parsed_and_other_lines_are_ignored(self):
+        with self.with_fake_gh("printf '{\"a\": 1}\\nnoise\\n  {\"b\": 2}\\n'"):
+            self.assertEqual(ci_timing._gh_lines("repos/x", "."), [{"a": 1}, {"b": 2}])
+
+    def test_a_failing_gh_reports_its_sanitized_stderr_and_does_not_traceback(self):
+        with self.with_fake_gh("printf 'boom \\033[31mred\\n' >&2; exit 1"):
+            with self.assertRaises(SystemExit) as caught:
+                ci_timing._gh_lines("repos/x", ".")
+        message = str(caught.exception)
+        self.assertIn("gh api failed for repos/x", message)
+        self.assertIn("boom ?[31mred", message)
+
+    def test_output_that_is_not_json_is_an_error_not_a_traceback(self):
+        with self.with_fake_gh("echo '{broken'"):
+            with self.assertRaises(SystemExit) as caught:
+                ci_timing._gh_lines("repos/x", ".")
+        self.assertIn("unexpected output from gh api", str(caught.exception))
+
+
+class ReportSectionTests(unittest.TestCase):
+    def runs(self, *jobs):
+        return [{"id": 1, "event": "push", "jobs": list(jobs)}]
+
+    def test_headings_and_the_skipped_note_appear_only_when_they_apply(self):
+        clean_text = ci_timing.report(self.runs(job("unit", 0, 10, 70)))
+        self.assertIn("== Jobs (queue = waiting for a runner, run = executing)", clean_text)
+        self.assertNotIn("skipped", clean_text)
+        skewed = ci_timing.report(self.runs(job("unit", 0, 10, 70), job("skew", 5, 4, 9)))
+        self.assertIn("(1 job(s) skipped", skewed)
+
+    def test_no_data_notes_appear_only_without_data(self):
+        runs = self.runs(job("unit", 0, 10, 70, steps=[step("t", 10, 70)]), job("other", 0, 10, 40, runner="r2"))
+        with_data = ci_timing.report(runs, check="unit", steps=["unit"], overlap_target="unit", heavy=["other"])
+        self.assertNotIn("(no data", with_data)
+        self.assertRegex(with_data, r"median\s+\d+\.\d min\s+p90\s+\d+\.\d min\s+max\s+\d+\.\d min")
+        self.assertIn("(a large jump with neighbours", with_data)
+        without = ci_timing.report(runs, check="nope", steps=["nope"], overlap_target="nope")
+        self.assertEqual(without.count("(no data"), 2)
+        self.assertNotIn("(a large jump", without)
+        self.assertIn("n=0", without)
+        self.assertNotRegex(without, r"median\s+\d+\.\d min")
+
+    def test_sections_are_separate_lines_and_the_check_heading_needs_a_check(self):
+        lines = ci_timing.report(self.runs(job("unit", 0, 10, 70))).split("\n")
+        self.assertEqual(lines[0], "1 runs")
+        self.assertEqual(lines[1], "")
+        self.assertTrue(lines[2].startswith("== Jobs"))
+        self.assertTrue(lines[3].startswith("job "))
+        self.assertTrue(lines[4].startswith("unit "))
+        self.assertNotIn("Time to required check", "\n".join(lines))
+        with_steps = ci_timing.report(self.runs(job("unit", 0, 10, 70, steps=[step("t", 10, 70)])), steps=["unit"], overlap_target="unit").split("\n")
+        self.assertIn("", with_steps[5:])
+        self.assertTrue(any(l.startswith("== Slowest steps of 'unit'") for l in with_steps))
+        self.assertTrue(any(l.startswith("== 'unit' run time by number") for l in with_steps))
+
+    def test_seconds_are_formatted_with_a_dash_for_missing_values(self):
+        self.assertEqual(ci_timing._fmt(None), "-")
+        self.assertEqual(ci_timing._fmt(5), "      5s")
+
+
+class CommandLineBoundaryTests(unittest.TestCase):
+    def test_limit_accepts_one_and_rejects_zero_and_negatives(self):
+        self.assertEqual(ci_timing._positive_int("1"), 1)
+        for bad in ("0", "-1"):
+            with self.subTest(value=bad), self.assertRaises(argparse.ArgumentTypeError) as caught:
+                ci_timing._positive_int(bad)
+            self.assertIn("at least 1", str(caught.exception))
+
+    def test_missing_required_arguments_are_a_usage_error(self):
+        for argv in (["collect", "--workflow", "ci.yml", "--since", "2026-01-01", "--out", "x"],
+                     ["collect", "--repo", "o/r", "--since", "2026-01-01", "--out", "x"],
+                     ["collect", "--repo", "o/r", "--workflow", "ci.yml", "--out", "x"],
+                     ["collect", "--repo", "o/r", "--workflow", "ci.yml", "--since", "2026-01-01"],
+                     ["report"], []):
+            with self.subTest(argv=argv), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+                ci_timing.main(argv)
+            self.assertEqual(caught.exception.code, 2)
+
+    def test_collect_defaults_are_100_runs_of_pull_request_and_push(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ci_timing, "collect", return_value=[]) as fake, redirect_stdout(io.StringIO()):
+            ci_timing.main(["collect", "--repo", "o/r", "--workflow", "ci.yml", "--since", "2026-01-01", "--out", f"{tmp}/o.json"])
+        self.assertEqual(fake.call_args.args[3:5], (100, {"pull_request", "push"}))
+
+    def test_help_describes_every_argument(self):
+        for argv, phrases in ((["collect", "--help"], ["OWNER/NAME", "workflow file name", "YYYY-MM-DD", "comma list; empty = all"]),
+                              (["--help"], ["download runs, jobs and steps", "print statistics from a collected file"]),
+                              (["report", "--help"], ["required-check job name", "break down by step", "bucketed by concurrent", "counted as neighbours", "cross-repo"])):
+            out = io.StringIO()
+            with self.subTest(argv=argv), redirect_stdout(out), self.assertRaises(SystemExit):
+                ci_timing.main(argv)
+            for phrase in phrases:
+                self.assertIn(phrase, " ".join(out.getvalue().split()))
 
 
 if __name__ == "__main__":
