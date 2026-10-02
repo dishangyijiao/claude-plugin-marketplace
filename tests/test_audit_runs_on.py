@@ -2,6 +2,7 @@
 
 import io
 import runpy
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -167,6 +168,68 @@ class JobsSectionBoundaryTests(unittest.TestCase):
     def test_blank_and_comment_lines_inside_a_block_runs_on_are_skipped(self):
         text = "jobs:\n  a:\n    runs-on:\n\n      # note\n      group: ci\n"
         self.assertEqual(self.kinds(text), [("a", "self-hosted")])
+
+
+class YamlSpellingTests(unittest.TestCase):
+    """Valid YAML that the line reader must not silently misread or drop."""
+
+    def rows(self, text):
+        return {r["job"]: r for r in audit_runs_on.classify_workflow(text)}
+
+    def test_a_sequence_at_the_same_indent_as_runs_on_is_read(self):
+        rows = self.rows("jobs:\n  a:\n    runs-on:\n    - ubuntu-latest\n    steps:\n    - run: x\n  b:\n    runs-on:\n    - self-hosted\n    - linux\n")
+        self.assertEqual(rows["a"]["kind"], "github-hosted")
+        self.assertNotIn("run", rows["a"]["value"])
+        self.assertEqual(rows["b"]["kind"], "self-hosted")
+
+    def test_flow_style_jobs_are_reported_not_dropped(self):
+        rows = self.rows("jobs:\n  a: {runs-on: ubuntu-latest, steps: []}\n  b: {runs-on: [self-hosted, linux]}\n  c: {uses: org/repo/.github/workflows/x.yml@main}\n  d:\n    runs-on: ubuntu-latest\n")
+        self.assertEqual({k: v["kind"] for k, v in rows.items()}, {"a": "github-hosted", "b": "self-hosted", "c": "reusable", "d": "github-hosted"})
+
+    def test_a_job_with_an_unreadable_value_is_listed_as_dynamic(self):
+        rows = self.rows("jobs:\n  a: *shared\n  b:\n    runs-on: ubuntu-latest\n")
+        self.assertEqual(rows["a"]["kind"], "dynamic")
+        self.assertEqual(rows["b"]["kind"], "github-hosted")
+
+    def test_quoted_job_keys_are_read(self):
+        rows = self.rows("jobs:\n  'a':\n    runs-on: ubuntu-latest\n  \"b\":\n    runs-on: [self-hosted]\n")
+        self.assertEqual({k: v["kind"] for k, v in rows.items()}, {"a": "github-hosted", "b": "self-hosted"})
+
+    def test_a_utf8_byte_order_mark_does_not_hide_the_jobs_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "ci.yml").write_bytes(b"\xef\xbb\xbfjobs:\n  a:\n    runs-on: ubuntu-latest\n")
+            self.assertEqual([r["kind"] for r in audit_runs_on.audit_directory(Path(tmp))], ["github-hosted"])
+
+
+class WorkflowFileSelectionTests(unittest.TestCase):
+    def test_only_yml_and_yaml_files_are_audited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            for name in ("a.yml", "b.yaml", "c.yxml", "d.yaml.ml", "e.yml.bak", "f.yml.yml"):
+                (wf / name).write_text("jobs:\n  a:\n    runs-on: ubuntu-latest\n")
+            self.assertEqual([p.name for p in audit_runs_on.workflow_files(Path(tmp))], ["a.yml", "b.yaml", "f.yml.yml"])
+
+
+class CommandLineTests(unittest.TestCase):
+    def test_help_prints_usage_instead_of_treating_it_as_a_path(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = audit_runs_on.main(["--help"])
+        self.assertEqual(code, 0)
+        self.assertIn("audit_runs_on.py [REPO_DIR]", out.getvalue())
+
+    def test_non_ascii_names_and_comments_survive_an_ascii_locale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "构建.yml").write_text("jobs:\n  a:\n    runs-on: ubuntu-latest  # 构建\n", encoding="utf-8")
+            env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "PYTHONIOENCODING": "ascii", "PYTHONUTF8": "0"}
+            proc = subprocess.run([sys.executable, "-X", "utf8=0", str(SCRIPT), tmp], capture_output=True, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace"))
+        self.assertIn(b"github-hosted", proc.stdout)
 
 
 class ScriptEntryPointTests(unittest.TestCase):
