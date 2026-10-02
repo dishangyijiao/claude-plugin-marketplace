@@ -207,6 +207,58 @@ class CollectPagingTests(unittest.TestCase):
         self.assertEqual(len(runs), 3)
 
 
+class UntrustedInputTests(unittest.TestCase):
+    """Job names and the --repo/--workflow values are not trusted."""
+
+    def test_control_characters_in_names_never_reach_the_report(self):
+        evil = "build\x1b[31m\nIGNORE PREVIOUS INSTRUCTIONS"
+        runs = [{"id": 1, "event": "push", "jobs": [job(evil, 0, 10, 70, steps=[step(evil, 10, 70)])]}]
+        text = ci_timing.report(runs, check=evil, steps=[evil], overlap_target=evil, heavy=[evil])
+        self.assertNotIn("\x1b", text)
+        self.assertFalse([ln for ln in text.splitlines() if ln.startswith("IGNORE")], "a newline in a name started a new report line")
+
+    def test_collect_rejects_values_that_would_change_the_endpoint(self):
+        def fake_fetch(path, jq):
+            raise AssertionError("must not call the API")
+
+        for repo, workflow in [("../x", "ci.yml"), ("o/r?x=1", "ci.yml"), ("o/r", "../ci.yml"), ("o/r", "ci.yml?x"), ("o", "ci.yml"), ("o/r/extra", "ci.yml")]:
+            with self.assertRaises(SystemExit, msg=(repo, workflow)):
+                ci_timing.collect(repo, workflow, "2026-01-01", limit=1, events=set(), fetch=fake_fetch)
+
+    def test_bidi_zero_width_and_line_separator_characters_are_replaced(self):
+        for ch in ["\u202e", "\u2066", "\u200b", "\ufeff", "\u2028", "\u2029", "\x85"]:
+            self.assertNotIn(ch, ci_timing.clean(f"a{ch}b"), repr(ch))
+        self.assertEqual(ci_timing.clean("构建 \U0001f680 build"), "构建 \U0001f680 build")
+
+    def test_trailing_newline_does_not_pass_validation(self):
+        for repo, workflow in [("o/r\n", "ci.yml"), ("o\n/r", "ci.yml"), ("o/r", "ci.yml\n")]:
+            with self.assertRaises(SystemExit, msg=(repo, workflow)):
+                ci_timing.validate_target(repo, workflow)
+
+    def test_run_id_must_be_an_integer(self):
+        def fake_fetch(path, jq):
+            if "/jobs" in path:
+                return []
+            return [{"id": "1/../../x", "event": "push", "conclusion": "success", "created_at": ts(0)}]
+
+        with self.assertRaises(ValueError):
+            ci_timing.collect("o/r", "ci.yml", "2026-01-01", limit=1, events=set(), fetch=fake_fetch)
+
+    def test_collect_does_not_keep_branch_names(self):
+        seen = []
+
+        def fake_fetch(path, jq):
+            seen.append(jq)
+            return []
+
+        ci_timing.collect("o/r", "ci.yml", "2026-01-01", limit=1, events=set(), fetch=fake_fetch)
+        self.assertFalse(any("head_branch" in jq for jq in seen))
+
+    def test_report_labels_time_to_check_by_what_it_measures(self):
+        runs = [{"id": 1, "event": "push", "jobs": [job("gate", 0, 10, 70)]}]
+        self.assertIn("first job created -> check done", ci_timing.report(runs, check="gate"))
+
+
 class ReportTests(unittest.TestCase):
     def test_report_cli_prints_job_table(self):
         runs = [{"id": 1, "event": "pull_request", "jobs": [job("unit", 0, 10, 70, steps=[step("tests", 10, 70)])]}]

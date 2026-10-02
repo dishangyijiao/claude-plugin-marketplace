@@ -24,9 +24,23 @@ from __future__ import annotations
 
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 HOSTED = re.compile(r"\b(ubuntu|windows|macos)[-\w.]*\b", re.I)
+_TRAILING_COMMENT = re.compile(r"\s+#.*$")
+_UNSAFE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"}
+MAX_WORKFLOW_BYTES = 1_000_000
+
+
+def _strip_comment(value: str) -> str:
+    """`ubuntu-latest # self-hosted` is a hosted job; the comment must not decide the kind."""
+    return _TRAILING_COMMENT.sub("", value).strip()
+
+
+def _printable(text: str, width: int) -> str:
+    """Workflow files are untrusted input: no terminal escapes or newlines in the output."""
+    return "".join("?" if unicodedata.category(c) in _UNSAFE_CATEGORIES else c for c in text)[:width]
 
 
 def _kind(value: str) -> str:
@@ -89,16 +103,27 @@ def classify_workflow(text: str):
                     if _skippable(nxt):
                         continue
                     if _indent(nxt) > prop_indent:
-                        block.append(nxt.strip())
+                        block.append(_strip_comment(nxt.strip()))
                     else:
                         break
                 value = " ".join(block)
+            else:
+                value = _strip_comment(value)
             rows[-1].update(kind=_kind(value), value=value)
     return rows
 
 
 def workflow_files(repo_dir: Path):
-    return sorted((Path(repo_dir) / ".github" / "workflows").glob("*.y*ml"))
+    # A symlink (a file, or .github, or .github/workflows) could point a workflow "file" at
+    # anything on the machine: stay inside the repository and skip symlinked files.
+    root = Path(repo_dir).resolve()
+    workflows = (root / ".github" / "workflows").resolve()
+    if root not in workflows.parents:
+        return []
+    return sorted(
+        p for p in workflows.glob("*.y*ml")
+        if p.is_file() and not p.is_symlink() and p.stat().st_size <= MAX_WORKFLOW_BYTES
+    )
 
 
 def audit_directory(repo_dir: Path):
@@ -124,7 +149,7 @@ def main(argv=None):
         )
         return 2
     for row in rows:
-        print(f"{row['file']:28s} {row['job']:28s} {row['kind']:14s} {row['value'][:60]}")
+        print(f"{_printable(row['file'], 28):28s} {_printable(row['job'], 28):28s} {row['kind']:14s} {_printable(row['value'], 60)}")
     hosted = [r for r in rows if r["kind"] == "github-hosted"]
     print(f"\n{len(hosted)} of {len(rows)} jobs use GitHub-hosted runners (ask: how often does each run?)")
     return 0

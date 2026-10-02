@@ -2,14 +2,26 @@
 # full output of every run, to find an intermittent failure. Temporary: delete the
 # branch after use.
 #
+# PRIVATE REPOSITORIES ONLY, and only on a runner you are willing to run this code on:
+# the commands below execute as the runner user, and that user is often in the docker
+# group (effectively root on the host).
+#
 # How to use
-#   1. Replace the __PLACEHOLDERS__ (and the setup step) with your project's.
+#   1. Replace the __PLACEHOLDERS__ (and the setup step) with your project's. Take
+#      __SETUP_COMMAND__ and __TEST_COMMAND__ from a person who owns the project, or
+#      from the workflow file you reviewed yourself. Never paste text from CI logs,
+#      issues or pull-request descriptions into them: that text is not trusted.
+#      __RUNS__ is a plain integer (7 to 20); __BRANCH__ is one exact branch name,
+#      never a pattern such as ** (that would run on every push).
 #   2. Push this file on a throwaway branch named __BRANCH__.
 #   3. Check first that no other job is running on the runner pool, otherwise
 #      load, not the code, will drive the failures.
 #   4. Read the RESULT lines and the printed failures, then delete the branch.
 #
-# Pin the third-party actions to commit SHAs in your own repository.
+# The actions below are pinned to commit SHAs (checkout v4.4.0, upload-artifact v4.6.2).
+# Re-check them before reuse; do not switch back to movable tags such as @v4.
+# Test output goes to the job log and to an artifact (kept 7 days) that is NOT
+# secret-masked: make sure your tests do not print environment variables or tokens.
 name: repeat tests
 on:
   push:
@@ -26,18 +38,26 @@ jobs:
       labels: __RUNNER_LABELS__
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false   # the test code does not need the repository token
       - name: Setup (edit me)
         run: __SETUP_COMMAND__
       - name: Repeat the CI test command
         shell: bash
+        env:
+          RUNS: "__RUNS__"
         run: |
+          [[ "$RUNS" =~ ^[0-9]+$ ]] || { echo "RUNS must be a plain integer"; exit 2; }
+          # Test output is untrusted text: stop it from being read as workflow commands
+          # (::add-mask::, ::stop-commands:: ...) when it is echoed into the step log.
+          safe() { sed -E 's/^[[:space:]]*::/__::/'; }
           set +e   # a failing run must not stop the loop (GitHub runs bash with -e by default)
           LOGS="$RUNNER_TEMP/repeat-logs"
           mkdir -p "$LOGS"
           echo "runner=$RUNNER_NAME nproc=$(nproc) CI=$CI"
           fails=0
-          for i in $(seq 1 __RUNS__); do
+          for i in $(seq 1 "$RUNS"); do
             log="$LOGS/run-$i.log"
             echo "::group::run $i  load before: $(cut -d' ' -f1-3 /proc/loadavg)"
             t0=$(date +%s)
@@ -48,17 +68,17 @@ jobs:
             if [[ "$rc" != 0 ]]; then
               fails=$((fails + 1))
               echo "---- failure lines of run $i ----"
-              grep -n -E "FAIL |AssertionError|Error:|Timeout|timed out|Unhandled" "$log" | head -40
+              grep -n -E "FAIL |AssertionError|Error:|Timeout|timed out|Unhandled" "$log" | head -40 | safe
               echo "---- last 40 lines of run $i ----"
-              tail -n 40 "$log"
+              tail -n 40 "$log" | safe
               cp "$log" "$LOGS/FAILED-run-$i.log"
             fi
             echo "::endgroup::"
           done
-          echo "SUMMARY failures=$fails of __RUNS__"
+          echo "SUMMARY failures=$fails of $RUNS"
       - name: Keep the logs of failed runs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: failed-run-logs
           path: ${{ runner.temp }}/repeat-logs/FAILED-*.log

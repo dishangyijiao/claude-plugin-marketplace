@@ -10,7 +10,8 @@ Standard library only; talks to GitHub through the `gh` CLI (read-only API calls
 Why these views (each one answered a real question during a CI investigation):
   * queue vs run      - is the time spent waiting for a runner or doing work?
   * slow steps        - where inside the job the time goes (incl. Post steps)
-  * time-to-check     - what a developer feels: PR event -> the required check done
+  * time-to-check     - what a developer feels: the run's first job created -> the
+                        required check done
   * overlap buckets   - does a job get slower when other heavy jobs run at the same
                         time on other runners? (the signature of CPU contention on
                         a shared host: same job, ~2-3x slower with 2+ neighbours)
@@ -21,14 +22,36 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import subprocess
 import sys
+import unicodedata
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from statistics import median
 
 FINISHED = {"success", "failure"}
+_UNSAFE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"}
+_NAME = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def clean(text, width=None):
+    """Printable form of text from the API. Job and step names are written by whoever
+    can edit a workflow, so control and format characters (terminal escapes, newlines,
+    bidi overrides, zero-width and line-separator characters) are replaced before they
+    reach a terminal or an LLM reading this output."""
+    text = "".join("?" if unicodedata.category(c) in _UNSAFE_CATEGORIES else c for c in str(text))
+    return text if width is None else text[:width]
+
+
+def validate_target(repo, workflow):
+    """Reject values that would change which API endpoint `gh api` is called with."""
+    owner, _, name = repo.partition("/")
+    if not (_NAME.fullmatch(owner) and _NAME.fullmatch(name)) or {owner, name} & {".", ".."}:
+        raise SystemExit(f"--repo must look like OWNER/NAME, got {clean(repo, 60)!r}")
+    if not _NAME.fullmatch(workflow) or workflow in {".", ".."}:
+        raise SystemExit(f"--workflow must be a workflow file name such as ci.yml, got {clean(workflow, 60)!r}")
 
 
 def parse_ts(value: str) -> datetime:
@@ -161,12 +184,13 @@ def collect(repo, workflow, since, limit, events, fetch=None):
     with per_page=100, which covers every job of a normal workflow.
     """
     fetch = fetch or _gh_lines
+    validate_target(repo, workflow)
     created = urllib.parse.quote(f">={since}", safe="")
     runs: list[dict] = []
     page = 1
     while len(runs) < limit:
         path = f"repos/{repo}/actions/workflows/{workflow}/runs?per_page=100&page={page}&created={created}"
-        batch = fetch(path, ".workflow_runs[]|{id,event,conclusion,created_at,head_branch}")
+        batch = fetch(path, ".workflow_runs[]|{id,event,conclusion,created_at}")
         runs += [r for r in batch if not events or r["event"] in events]
         if len(batch) < 100:
             break
@@ -177,7 +201,7 @@ def collect(repo, workflow, since, limit, events, fetch=None):
         "steps:[.steps[]|{name,conclusion,started_at,completed_at}]}"
     )
     for run in runs:
-        run["jobs"] = fetch(f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100", jq_jobs)
+        run["jobs"] = fetch(f"repos/{repo}/actions/runs/{int(run['id'])}/jobs?per_page=100", jq_jobs)
     return runs
 
 
@@ -194,21 +218,21 @@ def report(runs, check=None, steps=(), overlap_target=None, heavy=()):
     lines.append(f"{'job':34s} {'n':>4s} {'fail':>4s} {'queue med':>10s} {'queue p90':>10s} {'run med':>9s} {'run p90':>9s} {'run max':>9s}")
     for name, s in sorted(job_stats(runs).items(), key=lambda kv: -kv[1]["run_med"]):
         lines.append(
-            f"{name[:34]:34s} {s['n']:4d} {s['failed']:4d} {_fmt(s['queue_med']):>10s} {_fmt(s['queue_p90']):>10s} "
+            f"{clean(name, 34):34s} {s['n']:4d} {s['failed']:4d} {_fmt(s['queue_med']):>10s} {_fmt(s['queue_p90']):>10s} "
             f"{_fmt(s['run_med']):>9s} {_fmt(s['run_p90']):>9s} {_fmt(s['run_max']):>9s}"
         )
     for job_name in steps:
-        lines += ["", f"== Slowest steps of '{job_name}' (include 'Post ...' steps)"]
+        lines += ["", f"== Slowest steps of '{clean(job_name)}' (include 'Post ...' steps)"]
         for name, med, mx, n in step_stats(runs, job_name):
-            lines.append(f"  {name[:48]:48s} median {med:6.0f}s  max {mx:6.0f}s  n={n}")
+            lines.append(f"  {clean(name, 48):48s} median {med:6.0f}s  max {mx:6.0f}s  n={n}")
     if check:
         values = [v for v in (time_to_check(r, check) for r in runs) if v is not None]
-        lines += ["", f"== Time to required check '{check}' (PR event -> check done), n={len(values)}"]
+        lines += ["", f"== Time to required check '{clean(check)}' (first job created -> check done), n={len(values)}"]
         if values:
             lines.append(f"  median {median(values) / 60:5.1f} min   p90 {percentile(values, 90) / 60:5.1f} min   max {max(values) / 60:5.1f} min")
     if overlap_target:
         buckets = overlap_buckets(runs, set(heavy) | {overlap_target}, overlap_target)
-        lines += ["", f"== '{overlap_target}' run time by number of other heavy jobs running at the same time"]
+        lines += ["", f"== '{clean(overlap_target)}' run time by number of other heavy jobs running at the same time"]
         for k in sorted(buckets):
             v = buckets[k]
             lines.append(f"  {k} neighbours: n={len(v):3d}  median {median(v):6.0f}s  min {min(v):6.0f}s  max {max(v):6.0f}s")

@@ -7,7 +7,7 @@ This is a functional smoke test of a plugin's bundled analysis script, not a jud
 
 The plugin's script prints a report with these exact section headings:
   `== Jobs (queue = waiting for a runner, run = executing)`
-  `== Time to required check 'gate' (PR event -> check done)`
+  `== Time to required check 'gate' (first job created -> check done)`
 and, for this data, these values: job `build` queue median 20s and run median 560s; job `gate` queue median 5s and run median 75s; time to required check `gate`: median 11.0 min.
 
 PASS only if ALL of the following hold:

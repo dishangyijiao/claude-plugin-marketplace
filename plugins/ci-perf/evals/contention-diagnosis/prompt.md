@@ -20,4 +20,4 @@ allowed_tools: [Skill]
   3 neighbours: n=  4  median   1160s  min   1059s  max   1439s
 ```
 
-背景：目前有 3 个 runner 实例，全部在同一台虚拟机上（4 个 vCPU）。每个 pytest 任务用 4 个 worker 进程并行。
+背景：目前有 3 个 runner 实例，全部在同一台虚拟机上（4 个 vCPU）。每个 pytest 任务用 4 个 worker 进程并行。同一台虚拟机上还有另外几个仓库的 runner，上面的"邻居"也把它们的重任务算进去了。

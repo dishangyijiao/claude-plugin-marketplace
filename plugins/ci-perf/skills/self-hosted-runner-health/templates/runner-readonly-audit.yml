@@ -1,14 +1,24 @@
 # READ-ONLY audit of a self-hosted runner host. Temporary: delete the branch after use.
 #
+# PRIVATE REPOSITORIES ONLY. The log prints the runner name, directory sizes under the
+# home directory, volume names and image names; on a public repository anyone can read
+# Actions logs. Never run a self-hosted runner for a public repository.
+#
 # How to use
-#   1. Replace the __PLACEHOLDERS__ below.
+#   1. Replace the __PLACEHOLDERS__ below. __BRANCH__ must be one exact branch name,
+#      never a pattern such as ** (that would run on every push).
 #   2. Commit this file on a throwaway branch named __BRANCH__ and push it.
 #      It runs on push, so it works from a non-default branch (workflow_dispatch
 #      would require the file to be on the default branch first).
 #   3. Read the job log, then delete the branch.
 #
+# The runner user can often reach the docker socket, which is root-equivalent on the
+# host, so only run this on a runner you control.
+#
 # Nothing here changes the host: only df, du and docker list/inspect commands.
-# Do not add cleanup commands to this file; hand them to a human instead.
+# "Read-only" is a property of this file as written, not something GitHub enforces:
+# anyone who can push to the branch can edit it. Do not add cleanup commands to this
+# file; hand them to a human instead.
 name: runner readonly audit
 on:
   push:
@@ -29,6 +39,9 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          # Directory names are untrusted text: stop them from being read as workflow
+          # commands (a line starting with ::) when echoed into the log.
+          safe() { sed -E 's/^[[:space:]]*::/__::/'; }
           echo "runner=${RUNNER_NAME} user=$(id -un)"
 
           echo "::group::disk"
@@ -37,12 +50,12 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::biggest directories under the home directory (depth 2)"
-          du -xh --max-depth=2 "$HOME" 2>/dev/null | sort -rh | head -30
+          du -xh --max-depth=2 "$HOME" 2>/dev/null | sort -rh | head -30 | safe
           echo "::endgroup::"
 
           echo "::group::runner work, diagnostics and tool cache sizes"
-          du -sh "$HOME"/actions-runner*/_work "$HOME"/actions-runner*/_diag 2>/dev/null || true
-          du -sh "${RUNNER_TOOL_CACHE:-/nonexistent}"/* 2>/dev/null | sort -rh | head -20 || true
+          du -sh "$HOME"/actions-runner*/_work "$HOME"/actions-runner*/_diag 2>/dev/null | safe || true
+          du -sh "${RUNNER_TOOL_CACHE:-/nonexistent}"/* 2>/dev/null | sort -rh | head -20 | safe || true
           echo "::endgroup::"
 
           if command -v docker >/dev/null 2>&1; then
@@ -55,12 +68,16 @@ jobs:
             echo "::group::docker volumes"
             all="$(docker volume ls -q)"
             dangling="$(docker volume ls -q -f dangling=true)"
-            anon="$(printf '%s\n' "$dangling" | grep -E '^[0-9a-f]{64}$' || true)"
+            hex64="$(printf '%s\n' "$dangling" | grep -E '^[0-9a-f]{64}$' || true)"
+            labeled="$(docker volume ls -q -f dangling=true -f label=com.docker.volume.anonymous)"
+            # the only cleanup candidates: unreferenced AND 64-hex name AND anonymous label
+            anon="$(printf '%s\n' "$hex64" | grep -x -F -f <(printf '%s\n' "$labeled") || true)"
             named="$(printf '%s\n' "$all" | grep -v -E '^[0-9a-f]{64}$' || true)"
-            echo "total volumes:                   $(printf '%s\n' "$all" | grep -c . || true)"
-            echo "unreferenced (dangling):         $(printf '%s\n' "$dangling" | grep -c . || true)"
-            echo "dangling AND 64-hex anonymous:   $(printf '%s\n' "$anon" | grep -c . || true)"
-            echo "named volumes:                   $(printf '%s\n' "$named" | grep -c . || true)"
+            echo "total volumes:                           $(printf '%s\n' "$all" | grep -c . || true)"
+            echo "unreferenced (dangling):                 $(printf '%s\n' "$dangling" | grep -c . || true)"
+            echo "dangling AND 64-hex name:                $(printf '%s\n' "$hex64" | grep -c . || true)"
+            echo "dangling AND 64-hex AND anonymous label: $(printf '%s\n' "$anon" | grep -c . || true)"
+            echo "named volumes:                           $(printf '%s\n' "$named" | grep -c . || true)"
             echo "--- named volumes (look at these before anyone cleans anything)"
             printf '%s\n' "$named" | head -30
             echo "--- age range of the anonymous volumes (oldest, newest)"

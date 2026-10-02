@@ -87,6 +87,62 @@ class IndentationTests(unittest.TestCase):
         self.assertEqual(audit_runs_on.classify_workflow(text)[0]["kind"], "self-hosted")
 
 
+class UntrustedInputTests(unittest.TestCase):
+    def test_trailing_comment_does_not_change_the_kind(self):
+        text = "jobs:\n  a:\n    runs-on: ubuntu-latest # self-hosted soon\n  b:\n    runs-on: [self-hosted] # ubuntu-latest\n"
+        rows = {r["job"]: r for r in audit_runs_on.classify_workflow(text)}
+        self.assertEqual(rows["a"]["kind"], "github-hosted")
+        self.assertEqual(rows["a"]["value"], "ubuntu-latest")
+        self.assertEqual(rows["b"]["kind"], "self-hosted")
+
+    def test_comment_inside_block_runs_on_is_ignored(self):
+        text = "jobs:\n  a:\n    runs-on:\n      group: ci # ubuntu-latest\n      labels: [x]\n"
+        self.assertEqual(audit_runs_on.classify_workflow(text)[0]["kind"], "self-hosted")
+
+    def test_symlinked_workflow_files_are_not_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            secret = Path(tmp) / "secret.txt"
+            secret.write_text("jobs:\n  leak:\n    runs-on: ubuntu-latest\n")
+            wf = Path(tmp) / "repo" / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "link.yml").symlink_to(secret)
+            self.assertEqual(audit_runs_on.workflow_files(Path(tmp) / "repo"), [])
+
+    def test_symlinked_workflows_directory_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            outside = Path(tmp) / "outside"
+            outside.mkdir()
+            (outside / "x.yml").write_text("jobs:\n  leak:\n    runs-on: ubuntu-latest\n")
+            repo = Path(tmp) / "repo"
+            (repo / ".github").mkdir(parents=True)
+            (repo / ".github" / "workflows").symlink_to(outside)
+            self.assertEqual(audit_runs_on.workflow_files(repo), [])
+
+    def test_oversized_workflow_files_are_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "big.yml").write_text("#" * (audit_runs_on.MAX_WORKFLOW_BYTES + 1))
+            (wf / "ok.yml").write_text("jobs:\n  a:\n    runs-on: ubuntu-latest\n")
+            self.assertEqual([p.name for p in audit_runs_on.workflow_files(Path(tmp))], ["ok.yml"])
+
+    def test_bidi_and_line_separator_characters_are_replaced(self):
+        self.assertEqual(audit_runs_on._printable("a\u202eb\u2028c", 20), "a?b?c")
+
+    def test_output_has_no_control_characters(self):
+        import io
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "ci.yml").write_text("jobs:\n  a:\n    runs-on: \x1b[31mubuntu-latest\n")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                audit_runs_on.main([tmp])
+        self.assertNotIn("\x1b", out.getvalue())
+
+
 class MainMessageTests(unittest.TestCase):
     def run_main(self, repo):
         import io
