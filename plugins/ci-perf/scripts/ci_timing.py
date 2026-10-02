@@ -170,10 +170,16 @@ def overlap_buckets(runs, heavy_names, target_name):
 
 
 def _gh_lines(path: str, jq: str):
-    proc = subprocess.run(["gh", "api", path, "--jq", jq], capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(["gh", "api", path, "--jq", jq], capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        raise SystemExit("the GitHub CLI `gh` was not found: install it (https://cli.github.com), then run `gh auth login`") from None
     if proc.returncode != 0:
-        raise SystemExit(f"gh api failed for {path}: {proc.stderr.strip()[:300]}")
-    return [json.loads(line) for line in proc.stdout.splitlines() if line.strip().startswith("{")]
+        raise SystemExit(f"gh api failed for {clean(path)}: {clean(proc.stderr.strip(), 300)}")
+    try:
+        return [json.loads(line) for line in proc.stdout.splitlines() if line.strip().startswith("{")]
+    except json.JSONDecodeError:
+        raise SystemExit(f"unexpected output from gh api for {clean(path)}") from None
 
 
 def collect(repo, workflow, since, limit, events, fetch=None):
@@ -240,6 +246,23 @@ def report(runs, check=None, steps=(), overlap_target=None, heavy=()):
     return "\n".join(lines)
 
 
+def _positive_int(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return number
+
+
+def _load_runs(file):
+    try:
+        data = json.loads(Path(file).read_text())
+    except (OSError, ValueError) as err:
+        raise SystemExit(f"cannot read {clean(file)}: {clean(getattr(err, 'strerror', None) or err, 120)}") from None
+    if not isinstance(data, dict) or not isinstance(data.get("runs"), list):
+        raise SystemExit(f"cannot read {clean(file)}: not a file written by `collect`")
+    return data["runs"]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -248,7 +271,7 @@ def main(argv=None):
     c.add_argument("--repo", required=True, help="OWNER/NAME")
     c.add_argument("--workflow", required=True, help="workflow file name, e.g. ci.yml")
     c.add_argument("--since", required=True, help="YYYY-MM-DD")
-    c.add_argument("--limit", type=int, default=100)
+    c.add_argument("--limit", type=_positive_int, default=100)
     c.add_argument("--events", default="pull_request,push", help="comma list; empty = all")
     c.add_argument("--out", required=True)
 
@@ -263,12 +286,15 @@ def main(argv=None):
     if args.cmd == "collect":
         events = {e for e in args.events.split(",") if e}
         runs = collect(args.repo, args.workflow, args.since, args.limit, events)
-        Path(args.out).write_text(json.dumps({"runs": runs}))
+        try:
+            Path(args.out).write_text(json.dumps({"runs": runs}))
+        except OSError as err:
+            raise SystemExit(f"cannot write {clean(args.out)}: {clean(err.strerror or err, 120)}") from None
         print(f"wrote {len(runs)} runs to {args.out}")
         return 0
     runs = []
     for f in args.files:
-        runs += json.loads(Path(f).read_text())["runs"]
+        runs += _load_runs(f)
     split = lambda s: [x for x in s.split(",") if x]  # noqa: E731
     print(report(runs, args.check, split(args.steps), args.overlap_target, split(args.heavy)))
     return 0

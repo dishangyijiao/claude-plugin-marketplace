@@ -43,10 +43,10 @@ Rules:
   /tmp/covenv/bin/python -m coverage report -m
   ```
 
-  Baseline when this rule was adopted (0.1.1): 94% line and branch (`audit_runs_on.py` 95%, `ci_timing.py` 92%). New code should not lower it; the uncovered parts are the real `gh api` call, the `collect` CLI entry and the `__main__` guards.
+  Current baseline: 100% line and branch for both scripts. New code must not lower it.
 - A test for behavior that already exists passes at once, so it cannot show red. Prove it guards the code by temporarily breaking the production line (a mutation), seeing the test fail, and restoring the line. Say in the report which tests were checked this way.
 
-History note: versions up to 0.1.1 were written test-alongside-code, not test-first.
+History note: versions up to 0.1.1 were written test-alongside-code, not test-first. The coverage gaps left at 0.1.1 were closed afterwards, and the work was replayed as separate commits so the order is visible: a green `test:` commit for existing behavior (mutation-checked), a `test(red):` commit with 7 failing tests, then the `fix:` commit that turns them green. Earlier commits cannot show that order.
 
 ## Requirements
 
