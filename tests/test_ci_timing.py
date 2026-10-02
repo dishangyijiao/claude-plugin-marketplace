@@ -299,6 +299,11 @@ class GhLinesTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], ["gh", "api", "repos/o/r/x", "--jq", ".jq"])
         self.assertFalse(run.call_args.kwargs.get("shell", False))
 
+    def test_gh_output_is_decoded_as_utf8_whatever_the_locale(self):
+        _, run = self.run_gh(stdout="")
+        self.assertEqual(run.call_args.kwargs.get("encoding"), "utf-8")
+        self.assertEqual(run.call_args.kwargs.get("errors"), "replace")
+
     def test_a_failing_gh_stops_with_its_message(self):
         with self.assertRaises(SystemExit) as caught:
             self.run_gh(returncode=1, stderr="HTTP 404: Not Found\n")
