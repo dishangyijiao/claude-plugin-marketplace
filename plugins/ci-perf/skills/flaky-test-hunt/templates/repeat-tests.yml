@@ -1,0 +1,66 @@
+# Re-run the exact CI test command N times on an otherwise idle runner and KEEP the
+# full output of every run, to find an intermittent failure. Temporary: delete the
+# branch after use.
+#
+# How to use
+#   1. Replace the __PLACEHOLDERS__ (and the setup step) with your project's.
+#   2. Push this file on a throwaway branch named __BRANCH__.
+#   3. Check first that no other job is running on the runner pool, otherwise
+#      load, not the code, will drive the failures.
+#   4. Read the RESULT lines and the printed failures, then delete the branch.
+#
+# Pin the third-party actions to commit SHAs in your own repository.
+name: repeat tests
+on:
+  push:
+    branches: [__BRANCH__]
+permissions:
+  contents: read
+concurrency:
+  group: repeat-tests
+  cancel-in-progress: false
+jobs:
+  repeat:
+    runs-on:
+      group: __RUNNER_GROUP__
+      labels: __RUNNER_LABELS__
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup (edit me)
+        run: __SETUP_COMMAND__
+      - name: Repeat the CI test command
+        shell: bash
+        run: |
+          set +e   # a failing run must not stop the loop (GitHub runs bash with -e by default)
+          LOGS="$RUNNER_TEMP/repeat-logs"
+          mkdir -p "$LOGS"
+          echo "runner=$RUNNER_NAME nproc=$(nproc) CI=$CI"
+          fails=0
+          for i in $(seq 1 __RUNS__); do
+            log="$LOGS/run-$i.log"
+            echo "::group::run $i  load before: $(cut -d' ' -f1-3 /proc/loadavg)"
+            t0=$(date +%s)
+            __TEST_COMMAND__ > "$log" 2>&1     # exactly what the pipeline runs
+            rc=$?
+            t1=$(date +%s)
+            echo "RESULT run=$i exit=$rc seconds=$((t1 - t0)) load_after=$(cut -d' ' -f1-3 /proc/loadavg)"
+            if [[ "$rc" != 0 ]]; then
+              fails=$((fails + 1))
+              echo "---- failure lines of run $i ----"
+              grep -n -E "FAIL |AssertionError|Error:|Timeout|timed out|Unhandled" "$log" | head -40
+              echo "---- last 40 lines of run $i ----"
+              tail -n 40 "$log"
+              cp "$log" "$LOGS/FAILED-run-$i.log"
+            fi
+            echo "::endgroup::"
+          done
+          echo "SUMMARY failures=$fails of __RUNS__"
+      - name: Keep the logs of failed runs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-run-logs
+          path: ${{ runner.temp }}/repeat-logs/FAILED-*.log
+          if-no-files-found: ignore
+          retention-days: 7

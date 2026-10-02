@@ -1,0 +1,15 @@
+{
+  "name": "dishangyijiao-plugins",
+  "description": "Personal Claude Code plugins distilled from real engineering work. Generic, no project-specific data.",
+  "owner": {
+    "name": "dishangyijiao",
+    "url": "https://github.com/dishangyijiao"
+  },
+  "plugins": [
+    {
+      "name": "ci-perf",
+      "description": "Measure-first CI performance and reliability playbook for self-hosted runners: job/step timing and contention analysis, read-only runner audits, GitHub-hosted-minutes audit, and a repeat-run workflow that keeps full logs to catch intermittent test failures.",
+      "source": "./plugins/ci-perf"
+    }
+  ]
+}

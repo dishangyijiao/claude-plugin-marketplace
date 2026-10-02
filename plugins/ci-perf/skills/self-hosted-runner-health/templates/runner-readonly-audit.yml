@@ -1,0 +1,84 @@
+# READ-ONLY audit of a self-hosted runner host. Temporary: delete the branch after use.
+#
+# How to use
+#   1. Replace the __PLACEHOLDERS__ below.
+#   2. Commit this file on a throwaway branch named __BRANCH__ and push it.
+#      It runs on push, so it works from a non-default branch (workflow_dispatch
+#      would require the file to be on the default branch first).
+#   3. Read the job log, then delete the branch.
+#
+# Nothing here changes the host: only df, du and docker list/inspect commands.
+# Do not add cleanup commands to this file; hand them to a human instead.
+name: runner readonly audit
+on:
+  push:
+    branches: [__BRANCH__]
+permissions:
+  contents: read
+concurrency:
+  group: runner-readonly-audit
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on:
+      group: __RUNNER_GROUP__
+      labels: __RUNNER_LABELS__
+    timeout-minutes: 10
+    steps:
+      - name: Audit (read-only)
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "runner=${RUNNER_NAME} user=$(id -un)"
+
+          echo "::group::disk"
+          df -h / | cat
+          df -i / | cat
+          echo "::endgroup::"
+
+          echo "::group::biggest directories under the home directory (depth 2)"
+          du -xh --max-depth=2 "$HOME" 2>/dev/null | sort -rh | head -30
+          echo "::endgroup::"
+
+          echo "::group::runner work, diagnostics and tool cache sizes"
+          du -sh "$HOME"/actions-runner*/_work "$HOME"/actions-runner*/_diag 2>/dev/null || true
+          du -sh "${RUNNER_TOOL_CACHE:-/nonexistent}"/* 2>/dev/null | sort -rh | head -20 || true
+          echo "::endgroup::"
+
+          if command -v docker >/dev/null 2>&1; then
+            echo "::group::docker overview"
+            docker version --format 'client={{.Client.Version}} server={{.Server.Version}}' 2>&1
+            docker system df 2>&1
+            echo "containers (running and stopped): $(docker ps -aq | wc -l | tr -d ' ')"
+            echo "::endgroup::"
+
+            echo "::group::docker volumes"
+            all="$(docker volume ls -q)"
+            dangling="$(docker volume ls -q -f dangling=true)"
+            anon="$(printf '%s\n' "$dangling" | grep -E '^[0-9a-f]{64}$' || true)"
+            named="$(printf '%s\n' "$all" | grep -v -E '^[0-9a-f]{64}$' || true)"
+            echo "total volumes:                   $(printf '%s\n' "$all" | grep -c . || true)"
+            echo "unreferenced (dangling):         $(printf '%s\n' "$dangling" | grep -c . || true)"
+            echo "dangling AND 64-hex anonymous:   $(printf '%s\n' "$anon" | grep -c . || true)"
+            echo "named volumes:                   $(printf '%s\n' "$named" | grep -c . || true)"
+            echo "--- named volumes (look at these before anyone cleans anything)"
+            printf '%s\n' "$named" | head -30
+            echo "--- age range of the anonymous volumes (oldest, newest)"
+            printf '%s\n' "$anon" | xargs -r -n 100 docker volume inspect --format '{{.CreatedAt}}' | sort | sed -n '1p;$p'
+            echo "--- label sets of the anonymous volumes"
+            printf '%s\n' "$anon" | xargs -r -n 100 docker volume inspect --format '{{json .Labels}}' | sort | uniq -c | sort -rh | head -5
+            echo "--- volumes referenced by any container"
+            docker ps -aq | xargs -r docker inspect --format '{{range .Mounts}}{{.Name}} {{end}}' | tr ' ' '\n' | grep -c . || true
+            echo "::endgroup::"
+
+            echo "::group::docker images by size"
+            docker images --format '{{.Size}}\t{{.Repository}}:{{.Tag}}' | sort -rh | head -15
+            echo "::endgroup::"
+          else
+            echo "docker not installed on this runner"
+          fi
+
+          echo "::group::system directories and logs"
+          du -xsh /var/log /var/cache /tmp 2>/dev/null || true
+          journalctl --disk-usage 2>/dev/null || true
+          echo "::endgroup::"
