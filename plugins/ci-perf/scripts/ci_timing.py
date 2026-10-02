@@ -32,6 +32,7 @@ from pathlib import Path
 from statistics import median
 
 FINISHED = {"success", "failure"}
+MAX_JOB_PAGES = 20  # 2000 jobs per run; a guard against an API that ignores `page`
 _UNSAFE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"}
 _NAME = re.compile(r"[A-Za-z0-9_.-]+")
 
@@ -43,6 +44,32 @@ def clean(text, width=None):
     reach a terminal or an LLM reading this output."""
     text = "".join("?" if unicodedata.category(c) in _UNSAFE_CATEGORIES else c for c in str(text))
     return text if width is None else text[:width]
+
+
+def split_names(text):
+    """Split a comma list at top-level commas, so `build (ubuntu, 3.11), lint` is two names."""
+    names, depth, current = [], 0, []
+    for char in text:
+        if char in "([":
+            depth += 1
+        elif char in ")]":
+            depth = max(0, depth - 1)
+        if char == "," and depth == 0:
+            names.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    names.append("".join(current))
+    return [name.strip() for name in names if name.strip()]
+
+
+def validate_since(since):
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
+        raise SystemExit(f"--since must be a calendar date such as 2026-09-01, got {clean(since, 40)!r}")
+    try:
+        datetime.strptime(since, "%Y-%m-%d")
+    except ValueError:
+        raise SystemExit(f"--since must be a calendar date such as 2026-09-01, got {clean(since, 40)!r}") from None
 
 
 def validate_target(repo, workflow):
@@ -67,6 +94,14 @@ def percentile(values, p):
     return ordered[rank - 1]
 
 
+def _parses(value) -> bool:
+    try:
+        parse_ts(value)
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return True
+
+
 def _seconds(start: str, end: str) -> float:
     return (parse_ts(end) - parse_ts(start)).total_seconds()
 
@@ -77,10 +112,13 @@ def _finished(job) -> bool:
 
 
 def _valid(job) -> bool:
-    """Finished, and its timestamps are present and consistent (no clock skew)."""
-    if not _finished(job) or not job.get("created_at"):
+    """Finished, named, and its timestamps are parseable and consistent (no clock skew)."""
+    if not _finished(job) or not job.get("created_at") or not job.get("name"):
         return False
-    return _seconds(job["created_at"], job["started_at"]) >= 0 and _seconds(job["started_at"], job["completed_at"]) >= 0
+    try:
+        return _seconds(job["created_at"], job["started_at"]) >= 0 and _seconds(job["started_at"], job["completed_at"]) >= 0
+    except (ValueError, TypeError, AttributeError):
+        return False
 
 
 def invalid_job_count(runs) -> int:
@@ -116,7 +154,7 @@ def step_stats(runs, job_name, top=10):
     durations: dict[str, list[float]] = {}
     for run in runs:
         for job in run.get("jobs", []):
-            if job["name"] != job_name:
+            if job.get("name") != job_name:
                 continue
             for s in job.get("steps", []):
                 if s.get("started_at") and s.get("completed_at"):
@@ -128,9 +166,9 @@ def step_stats(runs, job_name, top=10):
 
 def time_to_check(run, check_name):
     """Seconds from the run's first job being created to `check_name` completing."""
-    jobs = [j for j in run.get("jobs", []) if j.get("created_at")]
+    jobs = [j for j in run.get("jobs", []) if _parses(j.get("created_at"))]
     # A skipped check (e.g. a draft pull request) has timestamps but no real duration.
-    check = [j for j in jobs if j["name"] == check_name and _valid(j)]
+    check = [j for j in jobs if j.get("name") == check_name and _valid(j)]
     if not check:
         return None
     first = min(parse_ts(j["created_at"]) for j in jobs)
@@ -148,7 +186,7 @@ def overlap_buckets(runs, heavy_names, target_name):
         j
         for run in runs
         for j in run.get("jobs", [])
-        if j["name"] in heavy_names and _valid(j)  # skipped/cancelled/skewed jobs are not real load
+        if _valid(j) and j["name"] in heavy_names  # skipped/cancelled/skewed jobs are not real load
     ]
     buckets: dict[int, list[float]] = {}
     for target in heavy:
@@ -171,7 +209,7 @@ def overlap_buckets(runs, heavy_names, target_name):
 
 def _gh_lines(path: str, jq: str):
     try:
-        proc = subprocess.run(["gh", "api", path, "--jq", jq], capture_output=True, text=True, check=False)
+        proc = subprocess.run(["gh", "api", path, "--jq", jq], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
     except FileNotFoundError:
         raise SystemExit("the GitHub CLI `gh` was not found: install it (https://cli.github.com), then run `gh auth login`") from None
     if proc.returncode != 0:
@@ -191,6 +229,7 @@ def collect(repo, workflow, since, limit, events, fetch=None):
     """
     fetch = fetch or _gh_lines
     validate_target(repo, workflow)
+    validate_since(since)
     created = urllib.parse.quote(f">={since}", safe="")
     runs: list[dict] = []
     page = 1
@@ -204,10 +243,15 @@ def collect(repo, workflow, since, limit, events, fetch=None):
     runs = runs[:limit]
     jq_jobs = (
         ".jobs[]|{name,conclusion,runner_name,created_at,started_at,completed_at,"
-        "steps:[.steps[]|{name,conclusion,started_at,completed_at}]}"
+        "steps:[(.steps // [])[]|{name,conclusion,started_at,completed_at}]}"
     )
     for run in runs:
-        run["jobs"] = fetch(f"repos/{repo}/actions/runs/{int(run['id'])}/jobs?per_page=100", jq_jobs)
+        run["jobs"] = []
+        for job_page in range(1, MAX_JOB_PAGES + 1):
+            batch = fetch(f"repos/{repo}/actions/runs/{int(run['id'])}/jobs?per_page=100&page={job_page}", jq_jobs)
+            run["jobs"] += batch
+            if len(batch) < 100:
+                break
     return runs
 
 
@@ -229,7 +273,10 @@ def report(runs, check=None, steps=(), overlap_target=None, heavy=()):
         )
     for job_name in steps:
         lines += ["", f"== Slowest steps of '{clean(job_name)}' (include 'Post ...' steps)"]
-        for name, med, mx, n in step_stats(runs, job_name):
+        rows = step_stats(runs, job_name)
+        if not rows:
+            lines.append("  (no data: no finished job with this name has steps; check the spelling)")
+        for name, med, mx, n in rows:
             lines.append(f"  {clean(name, 48):48s} median {med:6.0f}s  max {mx:6.0f}s  n={n}")
     if check:
         values = [v for v in (time_to_check(r, check) for r in runs) if v is not None]
@@ -239,10 +286,13 @@ def report(runs, check=None, steps=(), overlap_target=None, heavy=()):
     if overlap_target:
         buckets = overlap_buckets(runs, set(heavy) | {overlap_target}, overlap_target)
         lines += ["", f"== '{clean(overlap_target)}' run time by number of other heavy jobs running at the same time"]
+        if not buckets:
+            lines.append("  (no data: no finished job with this name; check the spelling)")
         for k in sorted(buckets):
             v = buckets[k]
             lines.append(f"  {k} neighbours: n={len(v):3d}  median {median(v):6.0f}s  min {min(v):6.0f}s  max {max(v):6.0f}s")
-        lines.append("  (a large jump with neighbours = CPU/IO contention on a shared host)")
+        if buckets:
+            lines.append("  (a large jump with neighbours = CPU/IO contention on a shared host)")
     return "\n".join(lines)
 
 
@@ -255,7 +305,7 @@ def _positive_int(value):
 
 def _load_runs(file):
     try:
-        data = json.loads(Path(file).read_text())
+        data = json.loads(Path(file).read_text(encoding="utf-8"))
     except (OSError, ValueError) as err:
         raise SystemExit(f"cannot read {clean(file)}: {clean(getattr(err, 'strerror', None) or err, 120)}") from None
     if not isinstance(data, dict) or not isinstance(data.get("runs"), list):
@@ -264,6 +314,8 @@ def _load_runs(file):
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")  # a job name must not crash the report under an ASCII locale
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -284,19 +336,23 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     if args.cmd == "collect":
-        events = {e for e in args.events.split(",") if e}
+        events = set(split_names(args.events))
         runs = collect(args.repo, args.workflow, args.since, args.limit, events)
         try:
-            Path(args.out).write_text(json.dumps({"runs": runs}))
+            Path(args.out).write_text(json.dumps({"runs": runs}), encoding="utf-8")
         except OSError as err:
             raise SystemExit(f"cannot write {clean(args.out)}: {clean(err.strerror or err, 120)}") from None
         print(f"wrote {len(runs)} runs to {args.out}")
         return 0
-    runs = []
+    runs, seen = [], set()
     for f in args.files:
-        runs += _load_runs(f)
-    split = lambda s: [x for x in s.split(",") if x]  # noqa: E731
-    print(report(runs, args.check, split(args.steps), args.overlap_target, split(args.heavy)))
+        for run in _load_runs(f):
+            run_id = run.get("id") if isinstance(run, dict) else None
+            if run_id is not None and run_id in seen:
+                continue
+            seen.add(run_id)
+            runs.append(run)
+    print(report(runs, args.check, split_names(args.steps), args.overlap_target, split_names(args.heavy)))
     return 0
 
 
