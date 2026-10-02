@@ -113,7 +113,7 @@ def classify_workflow(text: str):
             continue  # nested deeper (a step's env, a matrix, ...): not the job's own runner
         body = line.strip()
         if body.startswith("uses:"):
-            rows[-1].update(kind="reusable", value=body.split("uses:", 1)[1].strip())
+            rows[-1].update(kind="reusable", value=_strip_comment(body.split("uses:", 1)[1]))
         elif body.startswith("runs-on:"):
             value = body.split("runs-on:", 1)[1].strip()
             if not value or value.startswith("#"):  # block form: the more-indented lines that follow
