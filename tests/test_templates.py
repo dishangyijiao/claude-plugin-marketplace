@@ -137,6 +137,11 @@ class RepeatTestsTemplateTests(unittest.TestCase):
         self.assertIn("first", logs["run-1.log"])
         self.assertIn("second", logs["run-1.log"])
 
+    def test_a_trailing_comment_in_the_test_command_does_not_break_the_script(self):
+        proc, logs = self.run_repeat("echo hi  # the real suite", runs="1")
+        self.assertIn("SUMMARY failures=0 of 1", proc.stdout, proc.stderr)
+        self.assertIn("hi", logs["run-1.log"])
+
     def test_a_multiline_test_command_with_a_heredoc_works(self):
         proc, logs = self.run_repeat("cat <<EOT\nline one\nEOT\nfalse", runs="1")
         self.assertIn("SUMMARY failures=1 of 1", proc.stdout, proc.stderr)
