@@ -1,12 +1,17 @@
 """Tests for audit_runs_on.py: classify which workflow jobs use GitHub-hosted runners."""
 
+import io
+import runpy
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "plugins" / "ci-perf" / "scripts"))
+SCRIPT = ROOT / "plugins" / "ci-perf" / "scripts" / "audit_runs_on.py"
+sys.path.insert(0, str(SCRIPT.parent))
 
 import audit_runs_on  # noqa: E402
 
@@ -141,6 +146,37 @@ class UntrustedInputTests(unittest.TestCase):
             with redirect_stdout(out):
                 audit_runs_on.main([tmp])
         self.assertNotIn("\x1b", out.getvalue())
+
+
+class JobsSectionBoundaryTests(unittest.TestCase):
+    def kinds(self, text):
+        return [(r["job"], r["kind"]) for r in audit_runs_on.classify_workflow(text)]
+
+    def test_jobs_section_ends_at_the_next_top_level_key(self):
+        text = "jobs:\n  a:\n    runs-on: ubuntu-latest\nenv:\n  b:\n    runs-on: [self-hosted]\n"
+        self.assertEqual(self.kinds(text), [("a", "github-hosted")])
+
+    def test_a_line_at_job_level_that_is_not_a_job_key_is_ignored(self):
+        text = "jobs:\n  a:\n    runs-on: ubuntu-latest\n  - stray\n  b:\n    runs-on: [self-hosted]\n"
+        self.assertEqual(self.kinds(text), [("a", "github-hosted"), ("b", "self-hosted")])
+
+    def test_a_less_indented_line_inside_jobs_is_ignored(self):
+        text = "jobs:\n    a:\n  odd: 1\n        runs-on: ubuntu-latest\n"
+        self.assertEqual(self.kinds(text), [("a", "github-hosted")])
+
+    def test_blank_and_comment_lines_inside_a_block_runs_on_are_skipped(self):
+        text = "jobs:\n  a:\n    runs-on:\n\n      # note\n      group: ci\n"
+        self.assertEqual(self.kinds(text), [("a", "self-hosted")])
+
+
+class ScriptEntryPointTests(unittest.TestCase):
+    def test_running_the_file_as_a_program_exits_with_the_main_return_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = io.StringIO()
+            with mock.patch.object(sys, "argv", [str(SCRIPT), tmp]), redirect_stdout(out), self.assertRaises(SystemExit) as caught:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("no workflow files", out.getvalue())
 
 
 class MainMessageTests(unittest.TestCase):

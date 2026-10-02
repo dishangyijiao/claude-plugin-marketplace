@@ -2,14 +2,18 @@
 
 import io
 import json
+import runpy
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "plugins" / "ci-perf" / "scripts"))
+SCRIPT = ROOT / "plugins" / "ci-perf" / "scripts" / "ci_timing.py"
+sys.path.insert(0, str(SCRIPT.parent))
 
 import ci_timing  # noqa: E402
 
@@ -257,6 +261,120 @@ class UntrustedInputTests(unittest.TestCase):
     def test_report_labels_time_to_check_by_what_it_measures(self):
         runs = [{"id": 1, "event": "push", "jobs": [job("gate", 0, 10, 70)]}]
         self.assertIn("first job created -> check done", ci_timing.report(runs, check="gate"))
+
+
+class StepStatsEdgeTests(unittest.TestCase):
+    def test_steps_of_other_jobs_are_not_mixed_in(self):
+        runs = [{"jobs": [job("a", 0, 0, 100, steps=[step("x", 0, 50)]), job("b", 0, 0, 100, steps=[step("y", 0, 90)])]}]
+        self.assertEqual([row[0] for row in ci_timing.step_stats(runs, "a")], ["x"])
+
+    def test_steps_without_timestamps_are_ignored(self):
+        never_ran = {"name": "never ran", "conclusion": "skipped", "started_at": None, "completed_at": None}
+        runs = [{"jobs": [job("a", 0, 0, 100, steps=[never_ran, step("ran", 0, 10)])]}]
+        self.assertEqual([row[0] for row in ci_timing.step_stats(runs, "a")], ["ran"])
+
+
+class ReportEdgeTests(unittest.TestCase):
+    def test_check_that_never_completed_reports_zero_samples_without_statistics(self):
+        runs = [{"id": 1, "event": "push", "jobs": [job("unit", 0, 10, 70)]}]
+        text = ci_timing.report(runs, check="no such job")
+        self.assertTrue(text.rstrip().endswith("n=0"), text)
+
+
+class GhLinesTests(unittest.TestCase):
+    def run_gh(self, returncode=0, stdout="", stderr=""):
+        proc = SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+        with mock.patch.object(ci_timing.subprocess, "run", return_value=proc) as run:
+            result = ci_timing._gh_lines("repos/o/r/x", ".jq")
+        return result, run
+
+    def test_only_json_object_lines_are_parsed(self):
+        result, _ = self.run_gh(stdout='{"a": 1}\nnot json\n\n  {"b": 2}\n[1]\n')
+        self.assertEqual(result, [{"a": 1}, {"b": 2}])
+
+    def test_calls_gh_without_a_shell_and_with_the_given_path(self):
+        _, run = self.run_gh(stdout="")
+        self.assertEqual(run.call_args.args[0], ["gh", "api", "repos/o/r/x", "--jq", ".jq"])
+        self.assertFalse(run.call_args.kwargs.get("shell", False))
+
+    def test_a_failing_gh_stops_with_its_message(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.run_gh(returncode=1, stderr="HTTP 404: Not Found\n")
+        self.assertIn("HTTP 404: Not Found", str(caught.exception))
+        self.assertIn("repos/o/r/x", str(caught.exception))
+
+
+class CollectCliTests(unittest.TestCase):
+    def fake_gh(self, path, jq):
+        if "/jobs" in path:
+            return [job("unit", 0, 10, 70, steps=[step("tests", 10, 70)])]
+        return [{"id": 7, "event": "push", "conclusion": "success", "created_at": ts(0)}]
+
+    def run_collect(self, *extra):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "runs.json"
+            out = io.StringIO()
+            with mock.patch.object(ci_timing, "_gh_lines", self.fake_gh), redirect_stdout(out):
+                code = ci_timing.main(["collect", "--repo", "o/r", "--workflow", "ci.yml", "--since", "2026-01-01", "--out", str(out_path), *extra])
+            saved = json.loads(out_path.read_text()) if out_path.exists() else None
+        return code, out.getvalue(), saved
+
+    def test_collect_writes_runs_with_their_jobs_and_reports_the_count(self):
+        code, text, saved = self.run_collect()
+        self.assertEqual(code, 0)
+        self.assertIn("wrote 1 runs", text)
+        self.assertEqual(saved["runs"][0]["id"], 7)
+        self.assertEqual(saved["runs"][0]["jobs"][0]["name"], "unit")
+
+    def test_an_empty_events_filter_keeps_every_event(self):
+        def gh(path, jq):
+            if "/jobs" in path:
+                return []
+            return [{"id": 1, "event": "schedule", "conclusion": "success", "created_at": ts(0)}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "runs.json"
+            with mock.patch.object(ci_timing, "_gh_lines", gh), redirect_stdout(io.StringIO()):
+                ci_timing.main(["collect", "--repo", "o/r", "--workflow", "ci.yml", "--since", "2026-01-01", "--events", "", "--out", str(out_path)])
+            self.assertEqual(len(json.loads(out_path.read_text())["runs"]), 1)
+
+    def test_an_invalid_repo_stops_before_writing_anything(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "runs.json"
+            with mock.patch.object(ci_timing, "_gh_lines", self.fake_gh), self.assertRaises(SystemExit):
+                ci_timing.main(["collect", "--repo", "../x", "--workflow", "ci.yml", "--since", "2026-01-01", "--out", str(out_path)])
+            self.assertFalse(out_path.exists())
+
+
+class CliInputValidationTests(unittest.TestCase):
+    def collect_args(self, out_path, *extra):
+        return ["collect", "--repo", "o/r", "--workflow", "ci.yml", "--since", "2026-01-01", "--out", str(out_path), *extra]
+
+    def test_a_positive_limit_caps_the_number_of_collected_runs(self):
+        def gh(path, jq):
+            if "/jobs" in path:
+                return []
+            return [{"id": i, "event": "push", "conclusion": "success", "created_at": ts(0)} for i in range(1, 4)]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / "runs.json"
+            with mock.patch.object(ci_timing, "_gh_lines", gh), redirect_stdout(io.StringIO()):
+                ci_timing.main(self.collect_args(out_path, "--limit", "2"))
+            self.assertEqual(len(json.loads(out_path.read_text())["runs"]), 2)
+
+
+
+class ScriptEntryPointTests(unittest.TestCase):
+    def test_running_the_file_as_a_program_prints_the_report(self):
+        runs = [{"id": 1, "event": "push", "jobs": [job("unit", 0, 10, 70)]}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runs.json"
+            path.write_text(json.dumps({"runs": runs}))
+            out = io.StringIO()
+            with mock.patch.object(sys, "argv", [str(SCRIPT), "report", str(path)]), redirect_stdout(out), self.assertRaises(SystemExit) as caught:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+        self.assertEqual(caught.exception.code, 0)
+        self.assertIn("unit", out.getvalue())
 
 
 class ReportTests(unittest.TestCase):
