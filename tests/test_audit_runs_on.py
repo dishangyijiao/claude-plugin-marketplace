@@ -231,6 +231,19 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace"))
         self.assertIn(b"github-hosted", proc.stdout)
 
+    def test_main_replaces_unencodable_characters_on_a_strict_ascii_stream(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = Path(tmp) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "构建.yml").write_text("jobs:\n  a:\n    runs-on: ubuntu-latest\n", encoding="utf-8")
+            raw = io.BytesIO()
+            stream = io.TextIOWrapper(raw, encoding="ascii", errors="strict")
+            with redirect_stdout(stream):
+                code = audit_runs_on.main([tmp])
+            stream.flush()
+        self.assertEqual(code, 0)
+        self.assertIn(b"github-hosted", raw.getvalue())
+
 
 class ScriptEntryPointTests(unittest.TestCase):
     def test_running_the_file_as_a_program_exits_with_the_main_return_code(self):

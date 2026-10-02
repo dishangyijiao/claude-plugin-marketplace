@@ -515,6 +515,19 @@ class CollectBoundaryTests(unittest.TestCase):
         self.assertEqual(len(runs[0]["jobs"]), 105)
         self.assertEqual(job_pages, [1, 2])
 
+    def test_job_pagination_stops_at_the_page_cap_even_if_every_page_is_full(self):
+        job_requests = []
+
+        def gh(path, jq):
+            if "/jobs" not in path:
+                return [self.sample_run]
+            job_requests.append(path)
+            return [job("j", 0, 1, 2) for _ in range(100)]
+
+        runs = ci_timing.collect("o/r", "ci.yml", "2026-01-01", limit=1, events=set(), fetch=gh)
+        self.assertEqual(len(job_requests), ci_timing.MAX_JOB_PAGES)
+        self.assertEqual(len(runs[0]["jobs"]), 100 * ci_timing.MAX_JOB_PAGES)
+
     @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
     def test_the_job_filter_survives_jobs_whose_steps_are_null_or_missing(self):
         seen = {}
