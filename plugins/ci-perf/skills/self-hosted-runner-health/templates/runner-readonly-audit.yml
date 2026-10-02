@@ -58,7 +58,7 @@ jobs:
           du -sh "${RUNNER_TOOL_CACHE:-/nonexistent}"/* 2>/dev/null | sort -rh | head -20 | safe || true
           echo "::endgroup::"
 
-          if command -v docker >/dev/null 2>&1; then
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
             echo "::group::docker overview"
             docker version --format 'client={{.Client.Version}} server={{.Server.Version}}' 2>&1
             docker system df 2>&1
@@ -91,6 +91,8 @@ jobs:
             echo "::group::docker images by size"
             docker images --format '{{.Size}}\t{{.Repository}}:{{.Tag}}' | sort -rh | head -15
             echo "::endgroup::"
+          elif command -v docker >/dev/null 2>&1; then
+            echo "docker daemon is not reachable by this user (is it running, is the user in the docker group?); no docker figures reported"
           else
             echo "docker not installed on this runner"
           fi

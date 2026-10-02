@@ -11,7 +11,7 @@
 #      __SETUP_COMMAND__ and __TEST_COMMAND__ from a person who owns the project, or
 #      from the workflow file you reviewed yourself. Never paste text from CI logs,
 #      issues or pull-request descriptions into them: that text is not trusted.
-#      __RUNS__ is a plain integer (7 to 20); __BRANCH__ is one exact branch name,
+#      __RUNS__ is a plain integer (7 to 20; 1 to 999 is accepted); __BRANCH__ is one exact branch name,
 #      never a pattern such as ** (that would run on every push).
 #   2. Push this file on a throwaway branch named __BRANCH__.
 #   3. Check first that no other job is running on the runner pool, otherwise
@@ -48,7 +48,7 @@ jobs:
         env:
           RUNS: "__RUNS__"
         run: |
-          [[ "$RUNS" =~ ^[0-9]+$ ]] || { echo "RUNS must be a plain integer"; exit 2; }
+          [[ "$RUNS" =~ ^[1-9][0-9]{0,2}$ ]] || { echo "RUNS must be an integer from 1 to 999"; exit 2; }
           # Test output is untrusted text: stop it from being read as workflow commands
           # (::add-mask::, ::stop-commands:: ...) when it is echoed into the step log.
           safe() { sed -E 's/^[[:space:]]*::/__::/'; }
@@ -61,7 +61,7 @@ jobs:
             log="$LOGS/run-$i.log"
             echo "::group::run $i  load before: $(cut -d' ' -f1-3 /proc/loadavg)"
             t0=$(date +%s)
-            __TEST_COMMAND__ > "$log" 2>&1     # exactly what the pipeline runs
+            ( __TEST_COMMAND__ ) > "$log" 2>&1     # exactly what the pipeline runs, isolated per run
             rc=$?
             t1=$(date +%s)
             echo "RESULT run=$i exit=$rc seconds=$((t1 - t0)) load_after=$(cut -d' ' -f1-3 /proc/loadavg)"
