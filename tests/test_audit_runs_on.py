@@ -483,5 +483,17 @@ class QuotesInPlainAndFlowValuesTests(unittest.TestCase):
         self.assertEqual(rows, [{"job": "a", "kind": "dynamic", "value": "x #y"}])
 
 
+class QuoteBoundaryTests(unittest.TestCase):
+    def value(self, line):
+        return audit_runs_on.classify_workflow(f"jobs:\n  a:\n    {line}\n")[0]["value"]
+
+    def test_a_doubled_single_quote_is_an_escaped_apostrophe_not_the_end_of_the_value(self):
+        self.assertEqual(self.value("runs-on: 'it''s #label' # note"), "'it''s #label'")
+
+    def test_a_quote_inside_a_started_plain_value_does_not_hide_the_comment(self):
+        self.assertEqual(self.value("runs-on: foo 'bar # comment"), "foo 'bar")
+        self.assertEqual(self.value('runs-on: foo "bar # comment'), 'foo "bar')
+
+
 if __name__ == "__main__":
     unittest.main()
