@@ -493,6 +493,11 @@ class QuoteBoundaryTests(unittest.TestCase):
     def test_a_quote_after_a_closed_quoted_value_is_not_a_new_scalar_boundary(self):
         self.assertEqual(self.value("runs-on: \"a\" 'b # c"), "\"a\" 'b")
 
+    def test_a_hyphen_is_a_sequence_marker_only_at_the_start_and_before_whitespace(self):
+        self.assertEqual(self.value("runs-on: a - 'b # c"), "a - 'b")
+        self.assertEqual(self.value("runs-on: -'y #z'"), "-'y")
+        self.assertEqual(self.value("runs-on: - 'z #w' # c"), "- 'z #w'")
+
     def test_a_quote_inside_a_started_plain_value_does_not_hide_the_comment(self):
         self.assertEqual(self.value("runs-on: foo 'bar # comment"), "foo 'bar")
         self.assertEqual(self.value('runs-on: foo "bar # comment'), 'foo "bar')
