@@ -534,5 +534,20 @@ class QuotedValuesInInlineJobsTests(unittest.TestCase):
         self.assertEqual(self.row("{runs-on: 'x}y'}"), [{"job": "a", "kind": "dynamic", "value": "x}y"}])
 
 
+class HostedLabelPositionTests(unittest.TestCase):
+    def kind(self, runs_on):
+        return audit_runs_on.classify_workflow(f"jobs:\n  a:\n    runs-on: {runs_on}\n")[0]["kind"]
+
+    def test_a_hosted_image_name_is_recognised_wherever_a_label_starts(self):
+        for value in ("ubuntu-latest", '"ubuntu-latest"', "'macos-14'", "[ubuntu-latest]", "[linux, windows-2022]",
+                      "[ linux, ubuntu-22.04]", "{labels: ubuntu-24.04-arm}"):
+            with self.subTest(value=value):
+                self.assertEqual(self.kind(value), "github-hosted")
+
+    def test_an_image_name_inside_a_longer_word_is_not_a_label(self):
+        self.assertEqual(self.kind("x_ubuntu"), "dynamic")
+        self.assertEqual(self.kind("ubuntux_ubuntu"), "github-hosted")  # the first label really starts with ubuntu
+
+
 if __name__ == "__main__":
     unittest.main()
