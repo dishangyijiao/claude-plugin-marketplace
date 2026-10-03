@@ -498,5 +498,12 @@ class QuoteBoundaryTests(unittest.TestCase):
         self.assertEqual(self.value('runs-on: foo "bar # comment'), 'foo "bar')
 
 
+class QuotedBlockSequenceItemTests(unittest.TestCase):
+    def test_a_quoted_item_of_a_block_sequence_may_hold_a_hash(self):
+        text = "jobs:\n  a:\n    runs-on:\n      - 'my #label' # one\n      - \"self-hosted\" # two\n"
+        self.assertEqual(audit_runs_on.classify_workflow(text),
+                         [{"job": "a", "kind": "self-hosted", "value": "- 'my #label' - \"self-hosted\""}])
+
+
 if __name__ == "__main__":
     unittest.main()
