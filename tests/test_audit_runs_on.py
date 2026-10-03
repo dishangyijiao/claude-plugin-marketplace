@@ -449,5 +449,23 @@ class CommentAfterQuotesTests(unittest.TestCase):
         self.assertEqual(self.value("runs-on: it's-mine # self-hosted"), "it's-mine")
 
 
+class HashInsideQuotesTests(unittest.TestCase):
+    def value(self, line):
+        return audit_runs_on.classify_workflow(f"jobs:\n  a:\n    {line}\n")[0]["value"]
+
+    def test_a_hash_inside_a_quoted_value_is_not_a_comment(self):
+        self.assertEqual(self.value('uses: "./.github/workflows/build #1.yml"'), '"./.github/workflows/build #1.yml"')
+        self.assertEqual(self.value("runs-on: 'my #label'"), "'my #label'")
+
+    def test_a_real_comment_after_a_quoted_value_with_a_hash_is_still_removed(self):
+        self.assertEqual(self.value("uses: './x #1.yml' # shared"), "'./x #1.yml'")
+
+    def test_an_escaped_double_quote_does_not_end_the_quoted_value(self):
+        self.assertEqual(self.value(r'runs-on: "a \" # b" # c'), r'"a \" # b"')
+
+    def test_a_quoted_label_inside_a_flow_sequence_may_hold_a_hash(self):
+        self.assertEqual(self.value("runs-on: [self-hosted, 'a #b'] # c"), "[self-hosted, 'a #b']")
+
+
 if __name__ == "__main__":
     unittest.main()
