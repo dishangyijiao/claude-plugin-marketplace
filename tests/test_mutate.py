@@ -88,6 +88,11 @@ class SourceHandlingTests(unittest.TestCase):
             self.assertNotEqual(mutated, source, m.label)
             ast.parse(mutated)
 
+    def test_a_replacement_that_would_not_parse_is_not_offered(self):
+        source = 'x = f"{a!r:>5}"\n'
+        for m in mutate.generate(source):
+            ast.parse(mutate.apply(source, m))
+
     def test_labels_carry_the_one_based_line_number(self):
         labels = [m.label for m in mutate.generate("\n\nx = a < b\n")]
         self.assertIn("L3: < -> <=", labels)
@@ -138,6 +143,14 @@ class RunnerTests(unittest.TestCase):
         results = collections.defaultdict(lambda: None)
         results.update({r.mutant.label: r.status for r in mutate.run_mutants(root, "pkg/calc.py", ["tests.test_calc"], workers=2, timeout=3)})
         self.assertEqual(results["L4: + -> -"], "timeout")
+
+    def test_the_real_repository_is_never_modified(self):
+        root = self.project("def sign(x):\n    return x > 0\n", self.WEAK)
+        before = (root / "pkg" / "calc.py").read_text()
+        mutate.run_mutants(root, "pkg/calc.py", ["tests.test_calc"], workers=2, timeout=30)
+        self.assertEqual((root / "pkg" / "calc.py").read_text(), before)
+        self.assertEqual(sorted(p.name for p in root.iterdir()), ["pkg", "tests"])
+
 
 class CommandLineTests(unittest.TestCase):
     def project(self, test_body):
