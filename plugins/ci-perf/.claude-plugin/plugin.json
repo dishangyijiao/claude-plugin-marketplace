@@ -1,6 +1,6 @@
 {
   "name": "ci-perf",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Measure-first CI performance and reliability playbook for self-hosted GitHub Actions runners: timing and contention analysis, read-only runner audits, hosted-minutes audit, and a repeat-run workflow for intermittent test failures.",
   "author": {
     "name": "dishangyijiao",
