@@ -490,6 +490,9 @@ class QuoteBoundaryTests(unittest.TestCase):
     def test_a_doubled_single_quote_is_an_escaped_apostrophe_not_the_end_of_the_value(self):
         self.assertEqual(self.value("runs-on: 'it''s #label' # note"), "'it''s #label'")
 
+    def test_a_quote_after_a_closed_quoted_value_is_not_a_new_scalar_boundary(self):
+        self.assertEqual(self.value("runs-on: \"a\" 'b # c"), "\"a\" 'b")
+
     def test_a_quote_inside_a_started_plain_value_does_not_hide_the_comment(self):
         self.assertEqual(self.value("runs-on: foo 'bar # comment"), "foo 'bar")
         self.assertEqual(self.value('runs-on: foo "bar # comment'), 'foo "bar')

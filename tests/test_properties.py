@@ -542,7 +542,7 @@ class AuditLayoutProperties(unittest.TestCase):
                 self.assertEqual(plain, commented)
 
     VALUES = ["ubuntu-latest", '"ubuntu-latest"', "'my #label'", '"a \\" # b"', "it's-mine", "[self-hosted, 'a #b']",
-              "[a, \"b #c\"]", "a#b", "x\ty", '""', "''"]
+              "[a, \"b #c\"]", "a#b", "x\ty", '""', "''", "'it''s #label'", "foo 'bar", 'foo "bar', "a 'b'", "{k: 'v #w'}"]
 
     def test_appending_a_comment_never_changes_the_value_of_runs_on_or_uses(self):
         for seed in seeds():
@@ -556,6 +556,14 @@ class AuditLayoutProperties(unittest.TestCase):
                     commented = audit_runs_on.classify_workflow(f"jobs:\n  a:\n    {key}: {value}{gap}{comment}\n")
                     self.assertEqual(commented, plain)
                     self.assertEqual(plain[0]["value"], value)
+
+    def test_without_quotes_the_comment_rule_is_exactly_whitespace_then_a_hash(self):
+        """Differential check against the regular expression the function replaced."""
+        for seed in seeds(500):
+            rng = random.Random(seed)
+            value = "".join(rng.choice(["a", "b", " ", " ", "\t", "#", "#", "-", "x y"]) for _ in range(rng.randint(0, 14)))
+            with self.subTest(seed=seed, value=value):
+                self.assertEqual(audit_runs_on._strip_comment(value), re.sub(r"\s+#.*$", "", value).strip())
 
     def test_an_expression_is_always_dynamic_and_self_hosted_beats_a_hosted_name(self):
         for seed in seeds():
