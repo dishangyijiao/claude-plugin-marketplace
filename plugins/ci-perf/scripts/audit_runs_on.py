@@ -27,7 +27,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-HOSTED = re.compile(r"\b(ubuntu|windows|macos)[-\w.]*\b", re.I)
+HOSTED = re.compile(r"(?<![\w.-])(ubuntu|windows|macos)[-\w.]*\b", re.I)  # a label starts here: `my-ubuntu-box` is not an image
 _UNSAFE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"}
 MAX_WORKFLOW_BYTES = 1_000_000
 
