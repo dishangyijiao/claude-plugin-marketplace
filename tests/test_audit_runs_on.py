@@ -471,5 +471,17 @@ class HashInsideQuotesTests(unittest.TestCase):
         self.assertEqual(self.value("runs-on: [self-hosted, 'a #b'] # c"), "[self-hosted, 'a #b']")
 
 
+class QuotesInPlainAndFlowValuesTests(unittest.TestCase):
+    def value(self, line):
+        return audit_runs_on.classify_workflow(f"jobs:\n  a:\n    {line}\n")[0]["value"]
+
+    def test_a_quote_pair_inside_a_plain_value_is_ordinary_text(self):
+        self.assertEqual(self.value("runs-on: a 'b' # c"), "a 'b'")
+
+    def test_a_quoted_value_in_an_inline_job_may_hold_a_hash(self):
+        rows = audit_runs_on.classify_workflow('jobs:\n  a: {runs-on: "x #y"}\n')
+        self.assertEqual(rows, [{"job": "a", "kind": "dynamic", "value": "x #y"}])
+
+
 if __name__ == "__main__":
     unittest.main()
