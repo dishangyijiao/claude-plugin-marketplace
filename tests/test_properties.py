@@ -535,6 +535,22 @@ class AuditLayoutProperties(unittest.TestCase):
                 commented = audit_runs_on.classify_workflow(f"jobs:\n  a:\n    runs-on: {value} {comment}\n")
                 self.assertEqual(plain, commented)
 
+    VALUES = ["ubuntu-latest", '"ubuntu-latest"', "'my #label'", '"a \\" # b"', "it's-mine", "[self-hosted, 'a #b']",
+              "[a, \"b #c\"]", "a#b", "x\ty", '""', "''"]
+
+    def test_appending_a_comment_never_changes_the_value_of_runs_on_or_uses(self):
+        for seed in seeds():
+            rng = random.Random(seed)
+            value = rng.choice(self.VALUES)
+            comment = rng.choice(["# c", "#", "# 'x", '# "y', "#  # z", "# self-hosted"])
+            gap = rng.choice([" ", "  ", "\t"])
+            for key in ("runs-on", "uses"):
+                with self.subTest(seed=seed, key=key):
+                    plain = audit_runs_on.classify_workflow(f"jobs:\n  a:\n    {key}: {value}\n")
+                    commented = audit_runs_on.classify_workflow(f"jobs:\n  a:\n    {key}: {value}{gap}{comment}\n")
+                    self.assertEqual(commented, plain)
+                    self.assertEqual(plain[0]["value"], value)
+
     def test_an_expression_is_always_dynamic_and_self_hosted_beats_a_hosted_name(self):
         for seed in seeds():
             rng = random.Random(seed)

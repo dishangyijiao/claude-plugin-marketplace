@@ -445,6 +445,10 @@ class CommentAfterQuotesTests(unittest.TestCase):
         self.assertEqual(self.value('runs-on: "ubuntu-latest" # note'), '"ubuntu-latest"')
         self.assertEqual(self.value("uses: './x.yml' # note"), "'./x.yml'")
 
+    def test_an_empty_quoted_value_ends_at_its_second_quote(self):
+        self.assertEqual(self.value('runs-on: "" # note'), '""')
+        self.assertEqual(self.value("runs-on: '' # note"), "''")
+
     def test_an_apostrophe_inside_a_plain_value_does_not_start_a_quote(self):
         self.assertEqual(self.value("runs-on: it's-mine # self-hosted"), "it's-mine")
 
