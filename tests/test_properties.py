@@ -10,6 +10,7 @@ hostile input that must neither crash the script nor reach the terminal.
 import io
 import json
 import random
+import re
 import statistics
 import sys
 import tempfile
@@ -346,19 +347,24 @@ class CollectProperties(unittest.TestCase):
         events = [rng.choice(["push", "pull_request", "schedule"]) for _ in range(total_runs)]
         calls = []
 
+        def expect(condition, path):
+            if not condition:  # not `assert`: it must still fail under python -O
+                raise AssertionError(f"unexpected request: {path}")
+
         def fetch(path, jq):
             calls.append(path)
             parsed = urlparse(path)
             query = parse_qs(parsed.query)
             page, size = int(query["page"][0]), 100
-            assert query["per_page"] == ["100"], path
-            if "/jobs" not in path:
-                assert query["created"] == [">=2026-01-01"], path
-                assert parsed.path == "repos/o/r/actions/workflows/ci.yml/runs", path
-            if "/jobs" in path:
-                run_id = int(parsed.path.split("/")[-2])
+            expect(query["per_page"] == ["100"], path)
+            jobs_of = re.fullmatch(r"repos/o/r/actions/runs/(\d+)/jobs", parsed.path)
+            if jobs_of:
+                expect(set(query) == {"per_page", "page"}, path)
+                run_id = int(jobs_of.group(1))
                 n = jobs_per_run[run_id]
                 return [{"name": f"job{run_id}-{i}"} for i in range(n)][(page - 1) * size:page * size]
+            expect(parsed.path == "repos/o/r/actions/workflows/ci.yml/runs", path)
+            expect(query["created"] == [">=2026-01-01"] and set(query) == {"per_page", "page", "created"}, path)
             rows = [{"id": i, "event": events[i], "conclusion": "success", "created_at": ts(0)} for i in range(total_runs)]
             return rows[(page - 1) * size:page * size]
 
