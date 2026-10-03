@@ -449,7 +449,7 @@ class ReportProperties(unittest.TestCase):
 
 HOSTED_VALUES = ["ubuntu-latest", "ubuntu-22.04", "macos-14", "windows-2022"]
 SELF_VALUES = ["self-hosted", "{group: big}"]
-OTHER_VALUES = ["my-label", "${{ matrix.os }}", "ubuntu-${{ matrix.v }}"]
+OTHER_VALUES = ["my-label", "team-ubuntu-gpu", "${{ matrix.os }}", "ubuntu-${{ matrix.v }}"]
 
 
 def label_kind(label):
