@@ -113,7 +113,7 @@ claude plugin eval plugins/ci-perf --eval-dir evals-extra --allow-tools Bash Wri
 
 - 评测结果见上一节：只有部分场景显示出收益，且评分细则有已知偏差和缺口；脚本用例在部分机器上无法用评测框架运行。
 - `ci_timing.py` 通过 `gh api` 取数据（每个 run 一次请求），按需翻页、够数就停；仍会受 API 限流影响。并发分析只看得到你采集的 job，详见 `ci-perf-investigation` 的“工具局限”一节。
-- `audit_runs_on.py` 是逐行读取而不是 YAML 解析器，只支持块风格的 `jobs:`。写成一行的 job（`a: {runs-on: ...}`），其值在第一个 `,` 或 `}` 处结束，引号内的也一样。
+- `audit_runs_on.py` 是逐行读取而不是 YAML 解析器，只支持块风格的 `jobs:`。
 - 经验来自自建 runner + Docker + pnpm + pytest xdist 这类组合；其他环境请把它当作清单而不是结论。
 
 ## 许可

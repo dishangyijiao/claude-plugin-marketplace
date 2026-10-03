@@ -12,9 +12,7 @@ Static and read-only: it only reads `.github/workflows/*.yml`. Nothing is guesse
 Limits (it is a line-based reader, not a YAML parser, to stay dependency-free):
   * it follows the indentation actually used in each file (2 or 4 spaces, ...),
   * it supports block-style `jobs:` mappings only; flow style (`jobs: {a: {...}}`)
-    is reported as "parsed 0 jobs" instead of being silently skipped,
-  * a job written inline, `a: {runs-on: ...}`, ends its value at the first `,` or `}`,
-    even inside quotes.
+    is reported as "parsed 0 jobs" instead of being silently skipped.
 
 Only runs that actually execute a job are billed: jobs skipped by an `if:` cost
 nothing, and every job is rounded up to a full minute. Frequency matters more than

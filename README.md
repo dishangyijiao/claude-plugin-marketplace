@@ -114,7 +114,7 @@ Current release: `ci-perf--v0.1.2`.
 
 - See the evaluation section above: only some scenarios show a benefit, the rubrics have known biases and gaps, and the script case can't run under the eval harness on some machines.
 - `ci_timing.py` fetches data through `gh api` (one request per run), paginating on demand and stopping once it has enough; it is still subject to API rate limits. The concurrency analysis only sees the jobs you collected; see the "工具局限" (tool limitations) section of `ci-perf-investigation`.
-- `audit_runs_on.py` reads line by line rather than parsing YAML, and only supports block-style `jobs:`. A job written inline (`a: {runs-on: ...}`) ends its value at the first `,` or `}`, even inside quotes.
+- `audit_runs_on.py` reads line by line rather than parsing YAML, and only supports block-style `jobs:`.
 - The experience behind this comes from self-hosted runner + Docker + pnpm + pytest xdist setups. In other environments, treat it as a checklist rather than a conclusion.
 
 ## License
