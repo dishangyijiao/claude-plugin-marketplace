@@ -549,5 +549,15 @@ class HostedLabelPositionTests(unittest.TestCase):
         self.assertEqual(self.kind("ubuntux_ubuntu"), "github-hosted")  # the first label really starts with ubuntu
 
 
+class CustomLabelContainingAnImageNameTests(unittest.TestCase):
+    def kind(self, runs_on):
+        return audit_runs_on.classify_workflow(f"jobs:\n  a:\n    runs-on: {runs_on}\n")[0]["kind"]
+
+    def test_a_custom_label_that_merely_contains_an_image_name_is_not_github_hosted(self):
+        for value in ("my-ubuntu-runner", "gpu-windows-box", "team.macos.mini", "[my-ubuntu-runner, linux]", "- my-ubuntu-runner"):
+            with self.subTest(value=value):
+                self.assertEqual(self.kind(value), "dynamic")
+
+
 if __name__ == "__main__":
     unittest.main()
