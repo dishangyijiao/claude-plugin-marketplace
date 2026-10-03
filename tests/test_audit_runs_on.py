@@ -518,6 +518,16 @@ class QuotedValuesInInlineJobsTests(unittest.TestCase):
         self.assertEqual(self.row('{uses: "./.github/workflows/build,release.yml", with: {k: v}}'),
                          [{"job": "a", "kind": "reusable", "value": '"./.github/workflows/build,release.yml"'}])
 
+    def test_escaped_quotes_do_not_end_a_quoted_value(self):
+        self.assertEqual(self.row(r'{uses: "a\"b,c.yml"}')[0]["value"], r'"a\"b,c.yml"')
+        self.assertEqual(self.row("{uses: 'it''s,x.yml'}")[0]["value"], "'it''s,x.yml'")
+        self.assertEqual(self.row("{runs-on: 'it''s,x'}")[0]["value"], "it''s,x")
+
+    def test_unquoted_values_still_end_at_the_first_comma_or_brace(self):
+        self.assertEqual(self.row("{uses: ./x.yml, with: {k: v}}")[0]["value"], "./x.yml")
+        self.assertEqual(self.row("{runs-on: ubuntu-latest}")[0]["value"], "ubuntu-latest")
+        self.assertEqual(self.row("{runs-on: [self-hosted, linux], env: {}}")[0]["value"], "[self-hosted, linux]")
+
     def test_a_quoted_runner_label_with_a_comma_or_brace_stays_whole(self):
         self.assertEqual(self.row('{runs-on: "ubuntu-latest,beta", steps: []}'),
                          [{"job": "a", "kind": "github-hosted", "value": "ubuntu-latest,beta"}])
