@@ -36,22 +36,28 @@ def _strip_comment(value: str) -> str:
     """`ubuntu-latest # self-hosted` is a hosted job; the comment must not decide the kind.
 
     A comment starts at a `#` that follows whitespace, unless it sits inside a quoted
-    scalar. A quote only opens at the start of the value or after whitespace, `[`, `{` or
-    `,`, so the apostrophe of `it's` is not a quote.
+    scalar. A quote only opens at a scalar boundary: the start of the value, or after
+    `[`, `{`, `,` or `:`. Quotes inside a plain scalar (`it's`, `foo 'bar`) are text.
+    In single quotes `''` is an escaped apostrophe; in double quotes a backslash escapes.
     """
-    quote, escaped, prev = None, False, ""
+    quote, skip, prev, boundary = None, False, "", True
     for index, char in enumerate(value):
         if quote:
-            if escaped:
-                escaped = False
+            if skip:
+                skip = False
             elif char == "\\" and quote == '"':
-                escaped = True
+                skip = True
             elif char == quote:
-                quote = None
-        elif char in "\"'" and (prev.isspace() or prev in "[{,"):  # prev == "" is in every string
-            quote = char
+                if quote == "'" and value[index + 1:index + 2] == "'":
+                    skip = True
+                else:
+                    quote = None
+        elif char in "\"'" and boundary:
+            quote, boundary = char, False
         elif char == "#" and prev.isspace():
             return value[:index].strip()
+        elif not char.isspace():
+            boundary = char in "[{,:"
         prev = char
     return value.strip()
 
