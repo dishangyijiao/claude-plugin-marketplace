@@ -437,5 +437,17 @@ class ReusableCommentTests(unittest.TestCase):
         self.assertEqual(rows[0]["value"], "org/repo/.github/workflows/x.yml@v1#tag")
 
 
+class CommentAfterQuotesTests(unittest.TestCase):
+    def value(self, line):
+        return audit_runs_on.classify_workflow(f"jobs:\n  a:\n    {line}\n")[0]["value"]
+
+    def test_a_comment_after_a_closed_quoted_value_is_removed(self):
+        self.assertEqual(self.value('runs-on: "ubuntu-latest" # note'), '"ubuntu-latest"')
+        self.assertEqual(self.value("uses: './x.yml' # note"), "'./x.yml'")
+
+    def test_an_apostrophe_inside_a_plain_value_does_not_start_a_quote(self):
+        self.assertEqual(self.value("runs-on: it's-mine # self-hosted"), "it's-mine")
+
+
 if __name__ == "__main__":
     unittest.main()
