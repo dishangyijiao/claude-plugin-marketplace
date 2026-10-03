@@ -9,6 +9,8 @@ A Claude Code plugin marketplace. One plugin so far: `plugins/ci-perf`. Rules li
 - `plugins/ci-perf/skills/*/SKILL.md`: the three skills; bundled files are referenced as `${CLAUDE_PLUGIN_ROOT}/...`, never as bare relative paths.
 - `plugins/ci-perf/scripts/`: standard-library Python, read-only.
 - `plugins/ci-perf/evals/`: default `claude plugin eval` suite. `evals-extra/` holds the script smoke test that needs `Bash` and `Write`.
+- `tests/test_properties.py`: property tests, standard library only: seeded `random.Random`, so a failure names the seed and can be replayed. Use an independent model, a metamorphic check (the answer must not change) or hostile input; do not let the model call the code under test.
+- `tools/mutate.py`: the standard-library mutation runner (tests in `tests/test_mutate.py`). Development tool, not part of the plugin.
 - `README.md` (English, primary) and `README.zh-CN.md` (Chinese): keep numbers, paths and flags identical in both.
 
 ## Rules
@@ -44,7 +46,8 @@ Rules:
   ```
 
   Current baseline: 100% line and branch for both scripts. New code must not lower it.
-- A test for behavior that already exists passes at once, so it cannot show red. Prove it guards the code by temporarily breaking the production line (a mutation), seeing the test fail, and restoring the line. Say in the report which tests were checked this way.
+- A test for behavior that already exists passes at once, so it cannot show red. Prove it guards the code by mutation: `python3 tools/mutate.py plugins/ci-perf/scripts/NAME.py --tests tests.test_NAME tests.test_properties` changes the script one step at a time in throwaway copies and lists the mutants the suite did not notice (`--list` shows them without running, `--allow N` accepts N known equivalents). Every survivor is either a missing test (add it) or an equivalent mutant (say why in the commit message). For a single line it is enough to break it by hand, see the test fail, and restore the line (never with `git checkout` on a file that has uncommitted work). Say in the report which tests were checked this way.
+- Run the mutation tool again on a script you changed. Current baseline, all equivalent mutants: `audit_runs_on.py` 6 survivors (use `--allow 6`), `ci_timing.py` 10 (`--allow 10`), `tools/mutate.py` 20 (`--allow 20`, run against `tests.test_mutate`). A new survivor is a missing test until you have shown it is equivalent.
 
 History note: versions up to 0.1.1 were written test-alongside-code, not test-first. The coverage gaps left at 0.1.1 were closed afterwards, and the work was replayed as separate commits so the order is visible: a green `test:` commit for existing behavior (mutation-checked), a `test(red):` commit with 7 failing tests, then the `fix:` commit that turns them green. Earlier commits cannot show that order.
 

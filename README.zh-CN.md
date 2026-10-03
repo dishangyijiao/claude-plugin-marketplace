@@ -46,6 +46,7 @@ claude plugin install ci-perf@dishangyijiao-plugins
 
 ```bash
 python3 -m unittest discover -s tests     # 脚本逻辑 + 清单 + 隐私检查 + 模板只读检查
+python3 tools/mutate.py plugins/ci-perf/scripts/audit_runs_on.py --tests tests.test_audit_runs_on tests.test_properties   # 变异测试
 claude plugin validate .                  # 市场清单
 claude plugin validate plugins/ci-perf    # 插件清单
 claude plugin validate plugins/ci-perf/skills

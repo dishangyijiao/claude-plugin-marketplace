@@ -47,6 +47,7 @@ Try it locally without installing: `claude --plugin-dir plugins/ci-perf`
 
 ```bash
 python3 -m unittest discover -s tests     # script logic + manifests + privacy check + template read-only check
+python3 tools/mutate.py plugins/ci-perf/scripts/audit_runs_on.py --tests tests.test_audit_runs_on tests.test_properties   # mutation test
 claude plugin validate .                  # marketplace manifest
 claude plugin validate plugins/ci-perf    # plugin manifest
 claude plugin validate plugins/ci-perf/skills
