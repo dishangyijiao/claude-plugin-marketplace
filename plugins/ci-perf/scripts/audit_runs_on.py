@@ -37,7 +37,8 @@ def _strip_comment(value: str) -> str:
 
     A comment starts at a `#` that follows whitespace, unless it sits inside a quoted
     scalar. A quote only opens at a scalar boundary: the start of the value, or after
-    `[`, `{`, `,` or `:`. Quotes inside a plain scalar (`it's`, `foo 'bar`) are text.
+    `[`, `{`, `,` or `:`, or after the `- ` of a block-sequence item. Quotes inside a plain
+    scalar (`it's`, `foo 'bar`) are text.
     In single quotes `''` is an escaped apostrophe; in double quotes a backslash escapes.
     """
     quote, skip, prev, boundary = None, False, "", True
@@ -57,7 +58,7 @@ def _strip_comment(value: str) -> str:
         elif char == "#" and prev.isspace():
             return value[:index].strip()
         elif not char.isspace():
-            boundary = char in "[{,:"
+            boundary = char in "[{,:" or (char == "-" and index == 0 and value[1:2].isspace())
         prev = char
     return value.strip()
 
