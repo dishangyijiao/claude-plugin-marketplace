@@ -28,14 +28,32 @@ import unicodedata
 from pathlib import Path
 
 HOSTED = re.compile(r"\b(ubuntu|windows|macos)[-\w.]*\b", re.I)
-_TRAILING_COMMENT = re.compile(r"\s+#.*$")
 _UNSAFE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Cs", "Co", "Cn"}
 MAX_WORKFLOW_BYTES = 1_000_000
 
 
 def _strip_comment(value: str) -> str:
-    """`ubuntu-latest # self-hosted` is a hosted job; the comment must not decide the kind."""
-    return _TRAILING_COMMENT.sub("", value).strip()
+    """`ubuntu-latest # self-hosted` is a hosted job; the comment must not decide the kind.
+
+    A comment starts at a `#` that follows whitespace, unless it sits inside a quoted
+    scalar. A quote only opens at the start of the value or after whitespace, `[`, `{` or
+    `,`, so the apostrophe of `it's` is not a quote.
+    """
+    quote, escaped, prev = None, False, ""
+    for index, char in enumerate(value):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote == '"':
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in "\"'" and (prev.isspace() or prev in "[{,"):  # prev == "" is in every string
+            quote = char
+        elif char == "#" and prev.isspace():
+            return value[:index].strip()
+        prev = char
+    return value.strip()
 
 
 def _printable(text: str, width: int) -> str:
