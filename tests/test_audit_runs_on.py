@@ -510,5 +510,19 @@ class QuotedBlockSequenceItemTests(unittest.TestCase):
                          [{"job": "a", "kind": "self-hosted", "value": "- 'my #label' - \"self-hosted\""}])
 
 
+class QuotedValuesInInlineJobsTests(unittest.TestCase):
+    def row(self, inline):
+        return audit_runs_on.classify_workflow(f"jobs:\n  a: {inline}\n")
+
+    def test_a_quoted_workflow_path_with_a_comma_stays_whole(self):
+        self.assertEqual(self.row('{uses: "./.github/workflows/build,release.yml", with: {k: v}}'),
+                         [{"job": "a", "kind": "reusable", "value": '"./.github/workflows/build,release.yml"'}])
+
+    def test_a_quoted_runner_label_with_a_comma_or_brace_stays_whole(self):
+        self.assertEqual(self.row('{runs-on: "ubuntu-latest,beta", steps: []}'),
+                         [{"job": "a", "kind": "github-hosted", "value": "ubuntu-latest,beta"}])
+        self.assertEqual(self.row("{runs-on: 'x}y'}"), [{"job": "a", "kind": "dynamic", "value": "x}y"}])
+
+
 if __name__ == "__main__":
     unittest.main()
