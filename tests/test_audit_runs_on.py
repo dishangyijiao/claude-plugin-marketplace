@@ -317,6 +317,14 @@ class KindClassificationTests(unittest.TestCase):
                 self.assertEqual(self.kinds(value), kind)
 
 
+class GroupWordBoundaryTests(unittest.TestCase):
+    def test_group_is_a_whole_word_not_a_prefix_of_another_label(self):
+        kind = lambda value: audit_runs_on.classify_workflow(f"jobs:\n  a:\n    runs-on: {value}\n")[0]["kind"]  # noqa: E731
+        self.assertEqual(kind("groupie"), "dynamic")
+        self.assertEqual(kind("ubuntu-groupie"), "github-hosted")
+        self.assertEqual(kind("{group: big}"), "self-hosted")
+
+
 class RowShapeTests(unittest.TestCase):
     def test_rows_have_exactly_job_kind_and_value(self):
         text = "jobs:\n  a:\n    runs-on: ubuntu-latest\n  b:\n    uses: ./.github/workflows/x.yml\n  c:\n    name: no runner\n"

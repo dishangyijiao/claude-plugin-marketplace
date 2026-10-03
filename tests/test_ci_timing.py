@@ -1,6 +1,7 @@
 """Tests for ci_timing.py: pure analysis functions on synthetic run data."""
 
 import argparse
+import errno
 import io
 import json
 import os
@@ -963,7 +964,7 @@ class MessageExactnessTests(unittest.TestCase):
     def test_unreadable_files_report_the_system_reason_cut_at_120_characters(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = str(Path(tmp, "nope.json"))
-            self.assertEqual(self.message(ci_timing._load_runs, missing), f"cannot read {missing}: No such file or directory")
+            self.assertEqual(self.message(ci_timing._load_runs, missing), f"cannot read {missing}: {os.strerror(errno.ENOENT)}")
             bad = Path(tmp, "bad.json")
             bad.write_text("{")
             self.assertEqual(self.message(ci_timing._load_runs, str(bad)),
@@ -978,7 +979,7 @@ class MessageExactnessTests(unittest.TestCase):
         with mock.patch.object(ci_timing, "collect", return_value=[]):
             with tempfile.TemporaryDirectory() as tmp:
                 out = str(Path(tmp, "missing-dir", "o.json"))
-                self.assertEqual(self.message(ci_timing.main, argv + [out]), f"cannot write {out}: No such file or directory")
+                self.assertEqual(self.message(ci_timing.main, argv + [out]), f"cannot write {out}: {os.strerror(errno.ENOENT)}")
             with mock.patch.object(Path, "write_text", side_effect=OSError(13, "e" * 200)):
                 self.assertEqual(self.message(ci_timing.main, argv + ["o.json"]), f"cannot write o.json: {'e' * 120}")
 

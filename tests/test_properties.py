@@ -10,6 +10,7 @@ hostile input that must neither crash the script nor reach the terminal.
 import io
 import json
 import random
+import statistics
 import sys
 import tempfile
 import unicodedata
@@ -32,6 +33,11 @@ EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 def seeds(count=CASES):
     return range(count)
+
+
+def parse(text):
+    """Parse the API timestamp format without the production parser, so the oracles do not share its bugs."""
+    return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
 def ts(seconds):
@@ -97,7 +103,7 @@ def is_good(job):
     if job["conclusion"] not in ("success", "failure") or not job["name"]:
         return False
     try:
-        c, s, e = (ci_timing.parse_ts(job[k]) for k in ("created_at", "started_at", "completed_at"))
+        c, s, e = (parse(job[k]) for k in ("created_at", "started_at", "completed_at"))
     except (ValueError, TypeError, AttributeError):
         return False
     return c <= s <= e
@@ -109,7 +115,7 @@ def shift(runs, seconds):
         for j in run["jobs"]:
             for key in ("created_at", "started_at", "completed_at"):
                 if j.get(key) and j[key] != "not a time":
-                    j[key] = ts((ci_timing.parse_ts(j[key]) - EPOCH).total_seconds() + seconds)
+                    j[key] = ts((parse(j[key]) - EPOCH).total_seconds() + seconds)
     return moved
 
 
@@ -245,8 +251,8 @@ class TimeToCheckProperties(unittest.TestCase):
                 if not checks:
                     self.assertIsNone(result)
                     continue
-                created = [ci_timing.parse_ts(j["created_at"]) for j in run["jobs"] if j["created_at"]]
-                expected = (ci_timing.parse_ts(checks[0]["completed_at"]) - min(created)).total_seconds()
+                created = [parse(j["created_at"]) for j in run["jobs"] if j["created_at"]]
+                expected = (parse(checks[0]["completed_at"]) - min(created)).total_seconds()
                 self.assertEqual(result, expected)
                 self.assertGreaterEqual(result, 0)
 
@@ -269,7 +275,7 @@ class OverlapProperties(unittest.TestCase):
                 if o["started_at"] < t["completed_at"] and o["completed_at"] > t["started_at"]:
                     count += 1
             buckets.setdefault(count, []).append(
-                (ci_timing.parse_ts(t["completed_at"]) - ci_timing.parse_ts(t["started_at"])).total_seconds())
+                (parse(t["completed_at"]) - parse(t["started_at"])).total_seconds())
         return buckets
 
     def test_buckets_match_the_brute_force_model(self):
@@ -326,6 +332,7 @@ class StepStatsProperties(unittest.TestCase):
                 for name, med, mx, n in rows:
                     self.assertEqual(n, len(raw[name]))
                     self.assertEqual(mx, max(raw[name]))
+                    self.assertEqual(med, statistics.median(raw[name]))
                     self.assertLessEqual(med, mx)
                 self.assertEqual(len(ci_timing.step_stats(runs, "build", top=100)), len(raw))
 
@@ -342,7 +349,12 @@ class CollectProperties(unittest.TestCase):
         def fetch(path, jq):
             calls.append(path)
             parsed = urlparse(path)
-            page, size = int(parse_qs(parsed.query)["page"][0]), 100
+            query = parse_qs(parsed.query)
+            page, size = int(query["page"][0]), 100
+            assert query["per_page"] == ["100"], path
+            if "/jobs" not in path:
+                assert query["created"] == [">=2026-01-01"], path
+                assert parsed.path == "repos/o/r/actions/workflows/ci.yml/runs", path
             if "/jobs" in path:
                 run_id = int(parsed.path.split("/")[-2])
                 n = jobs_per_run[run_id]
@@ -456,7 +468,7 @@ def combined_kind(labels):
 
 
 def random_workflow(rng):
-    """(model rows, text, plain text): the same jobs rendered in a random layout and in a fixed one."""
+    """(jobs, model rows): random jobs, and the rows the audit must report for them in any layout."""
     jobs = []
     for i in range(rng.randint(1, 5)):
         name = f"job-{i}"
