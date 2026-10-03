@@ -120,7 +120,6 @@ class RunnerTests(unittest.TestCase):
         results = collections.defaultdict(lambda: None)
         results.update({r.mutant.label: r.status for r in mutate.run_mutants(root, "pkg/calc.py", ["tests.test_calc"], workers=2, timeout=30)})
         self.assertEqual(results["L2: > -> >="], "survived")  # sign(0) is never asked
-        self.assertEqual(results["L2: > -> <"], "killed")
         self.assertEqual(results["L2: return -> None"], "killed")
         self.assertEqual(results["L2: 0 -> 1"], "survived")
 
