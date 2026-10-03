@@ -81,8 +81,9 @@ def _kind(value: str) -> str:
 
 
 _JOB_KEY = re.compile(r"^\s*(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z0-9_-]+)):\s*(.*?)\s*$")
-_FLOW_RUNS_ON = re.compile(r"runs-on:\s*(\[[^\]]*\]|[^,}]+)")
-_FLOW_USES = re.compile(r"uses:\s*([^,}]+)")
+_QUOTED = r"\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*'"
+_FLOW_RUNS_ON = re.compile(rf"runs-on:\s*(\[[^\]]*\]|{_QUOTED}|[^,}}]+)")
+_FLOW_USES = re.compile(rf"uses:\s*({_QUOTED}|[^,}}]+)")
 
 
 def _inline_job(rest: str):
