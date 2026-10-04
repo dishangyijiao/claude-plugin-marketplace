@@ -41,6 +41,18 @@ class SkillTests(unittest.TestCase):
             description = re.search(r"(?m)^description: (.+)$", body).group(1)
             self.assertRegex(description, r"(?i)\buse (when|for)\b", name)
 
+    def test_every_skill_has_one_worked_example(self):
+        for name in SKILLS:
+            body = read(PLUGIN / "skills" / name / "SKILL.md")
+            self.assertEqual(len(re.findall(r"<example>", body)), 1, name)
+            self.assertEqual(len(re.findall(r"</example>", body)), 1, name)
+
+    def test_no_skill_uses_the_vague_words_nlpm_flags(self):
+        for name in SKILLS:
+            body = read(PLUGIN / "skills" / name / "SKILL.md")
+            for word in ["several", "relevant", "various", "some", "many", "appropriate"]:
+                self.assertIsNone(re.search(rf"(?i)\b{word}\b", body), f"{name}: {word}")
+
     def test_review_is_read_only_and_says_so(self):
         body = read(PLUGIN / "skills" / "review" / "SKILL.md")
         self.assertRegex(body, r"(?i)read-only")
