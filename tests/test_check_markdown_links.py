@@ -71,6 +71,10 @@ class AnchorTests(unittest.TestCase):
             {"score-details", "score-details-1", "second-term"},
         )
 
+    def test_each_space_becomes_one_hyphen_and_punctuation_does_not_merge_them(self):
+        # GitHub removes the ampersand but keeps both spaces; hyphens are kept as typed.
+        self.assertEqual(links.heading_anchors("# A & B\n## A - B"), {"a--b", "a---b"})
+
     def test_headings_inside_fenced_code_blocks_are_not_anchors(self):
         self.assertEqual(links.heading_anchors("# Real\n```\n# Not a heading\n```\n"), {"real"})
 
@@ -89,6 +93,12 @@ class CheckDocumentsTests(unittest.TestCase):
         directory, root = make_repo({"README.md": "[a](guide.md#hello-world) [b](#intro)\n# Intro\n", "guide.md": "# Hello World\n"})
         with directory:
             self.assertEqual(links.check_documents(root, [root / "README.md"]), [])
+
+    def test_a_link_to_a_heading_with_an_ampersand_uses_the_double_hyphen(self):
+        directory, root = make_repo({"README.md": "[ok](g.md#rust--js) [bad](g.md#rust-js)\n", "g.md": "# Rust & JS\n"})
+        with directory:
+            errors = links.check_documents(root, [root / "README.md"])
+        self.assertEqual(errors, ["README.md: missing heading anchor: g.md#rust-js"])
 
     def test_a_link_that_leaves_the_repository_is_an_error(self):
         directory, root = make_repo({"inner/README.md": "[out](../../outside.md)\n"})
