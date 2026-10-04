@@ -59,6 +59,13 @@ class SkillTests(unittest.TestCase):
         self.assertIn("improve", read(PLUGIN / "skills" / "review" / "SKILL.md"))
         self.assertIn("review", read(PLUGIN / "skills" / "improve" / "SKILL.md"))
 
+    def test_improve_makes_traceability_durable_and_checks_its_report_against_the_diff(self):
+        body = read(PLUGIN / "skills" / "improve" / "SKILL.md")
+        self.assertRegex(body, r"(?i)traceability")
+        self.assertRegex(body, r"(?i)every (identifier|id) (cited|that is cited)")
+        self.assertRegex(body, r"(?i)loses? (its|the) (tag|identifier|id)")
+        self.assertIn("git diff", body)
+
     def test_improve_uses_the_bundled_link_checker(self):
         self.assertIn("${CLAUDE_PLUGIN_ROOT}/scripts/check_markdown_links.py", read(PLUGIN / "skills" / "improve" / "SKILL.md"))
 
