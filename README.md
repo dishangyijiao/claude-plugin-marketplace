@@ -50,7 +50,7 @@ Bundled files: `reference/layers.md` (the layers, three applicability states, ev
 python3 plugins/source-of-truth/scripts/check_markdown_links.py <repo directory>   # exit 0 ok, 1 broken links, 2 usage error
 ```
 
-The evaluation cases in `plugins/source-of-truth/evals/` have **not been run yet**; no benefit over the no-plugin baseline has been measured for this plugin.
+**Evaluation (one run, 2 runs per arm, 5 cases, about US$1.74):** the four functional cases scored 1.00 with the plugin and 1.00 without it, so **no benefit over the no-plugin baseline was measured**: the model already refuses to rewrite an accepted ADR, to invent a missing rationale, or to create placeholder documents for layers that do not apply. The unrelated control scored 0.50 with the plugin and 1.00 without: in the one failing run the code and tests were correct and nothing digressed, but it was the only answer without an empty-list test, and the rubric's wording about the empty list is ambiguous. That points at the rubric, not at interference, but the rubric has not been changed. What the plugin adds is consistency: the same templates, applicability states and checks each time, which these cases do not measure.
 
 ## Install
 
