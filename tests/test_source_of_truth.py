@@ -18,6 +18,7 @@ TEMPLATE_SECTIONS = {
     "AGENTS.md": ["Read Order", "Source-of-Truth Rules", "Change Policy", "Verification", "Safety"],
     "status.md": ["Layer status", "Duplicated or conflicting sources", "Risks", "To-do", "Not doing"],
     "sources.md": ["Where each fact lives"],
+    "architecture.md": ["Context and boundaries", "Components", "Data flows", "Trust boundaries", "Deployment", "Constraints"],
 }
 
 
@@ -118,6 +119,50 @@ class TemplateTests(unittest.TestCase):
     def test_templates_use_placeholders_not_real_values(self):
         for name in TEMPLATE_SECTIONS:
             self.assertRegex(read(PLUGIN / "templates" / name), r"__[A-Z_]+__", name)
+
+
+class ConsistencyTests(unittest.TestCase):
+    """Findings of nlpm:check on the plugin's own files."""
+
+    def texts(self):
+        for path in sorted(PLUGIN.rglob("*.md")):
+            if "evals" not in path.parts:
+                yield path.relative_to(PLUGIN).as_posix(), path.read_text()
+
+    def test_unrecorded_alternatives_are_never_stated_as_fact_but_may_be_labelled_hypotheses(self):
+        for name in ["reference/rules.md", "reference/layers.md", "skills/scaffold/SKILL.md", "skills/improve/SKILL.md", "templates/ADR.md", "templates/AGENTS.md"]:
+            self.assertRegex(read(PLUGIN / name), r"(?i)labell?ed hypothes", name)
+
+    def test_the_sources_table_has_one_name(self):
+        for name, body in self.texts():
+            for stale in ["table of where each fact lives", "Current canonical sources", "Documentation and sources of truth"]:
+                self.assertNotIn(stale, body, f"{name}: {stale}")
+
+    def test_the_status_artifact_is_always_the_status_table(self):
+        for name, body in self.texts():
+            self.assertNotIn("status document", body, name)
+
+    def test_layer_five_is_always_called_spec(self):
+        for name, body in self.texts():
+            self.assertNotIn("Spec / contracts", body, name)
+
+    def test_every_skill_closes_with_the_same_six_items_or_says_why_not(self):
+        items = ["files changed", "source-of-truth impact", "behavior impact", "checks executed", "unresolved uncertainty", "follow-up"]
+        for name in ["scaffold", "improve"]:
+            body = read(PLUGIN / "skills" / name / "SKILL.md").lower()
+            for item in items:
+                self.assertIn(item, body, f"{name}: {item}")
+        self.assertRegex(read(PLUGIN / "skills" / "review" / "SKILL.md"), r"(?i)changes nothing.*own report|own report.*changes nothing")
+
+    def test_the_definition_of_done_walks_the_nine_layers(self):
+        body = read(PLUGIN / "reference" / "rules.md").split("## Definition of done")[1]
+        for layer in LAYERS:
+            self.assertRegex(body, rf"(?m)^- \*\*{layer}\*\*", layer)
+        self.assertNotIn("AI collaboration", body)
+
+    def test_improve_names_templates_it_can_use_for_the_artifacts_it_lists(self):
+        body = read(PLUGIN / "skills" / "improve" / "SKILL.md")
+        self.assertIn("templates/architecture.md", body)
 
 
 class RegistrationTests(unittest.TestCase):
