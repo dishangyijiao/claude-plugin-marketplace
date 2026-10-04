@@ -50,7 +50,20 @@ Bundled files: `reference/layers.md` (the layers, three applicability states, ev
 python3 plugins/source-of-truth/scripts/check_markdown_links.py <repo directory>   # exit 0 ok, 1 broken links, 2 usage error
 ```
 
-**Evaluation (one run, 2 runs per arm, 5 cases, about US$1.74):** the four functional cases scored 1.00 with the plugin and 1.00 without it, so **no benefit over the no-plugin baseline was measured**: the model already refuses to rewrite an accepted ADR, to invent a missing rationale, or to create placeholder documents for layers that do not apply. The unrelated control scored 0.50 with the plugin and 1.00 without: in the one failing run the code and tests were correct and nothing digressed, but it was the only answer without an empty-list test, and the rubric's wording about the empty list is ambiguous. That pointed at the rubric, not at interference. After clarifying item 1 (it judges the function, not test coverage) and re-running only that case with 4 runs per arm, both arms scored 1.00. **First real use:** `review` was run read-only on the repository this plugin was distilled from. It found two true problems, one of them a mistake made earlier the same day (compiled Python files committed by accident) and the lack of any requirement-to-test IDs, and otherwise mostly restated a status page that already existed, so it shows little on a repository that has already been through this process. It has not been tried on a repository that has not. What the plugin adds is consistency: the same templates, applicability states and checks each time, which these cases do not measure.
+**Evaluation (6 cases, latest full run 2 runs per arm, about US$2.4; the traceability case was also run alone with 4 runs per arm):**
+
+| Case | With plugin | Without | Reading |
+|---|---|---|---|
+| improve-accepted-adr-immutable | 1.00 | 1.00 | The model already refuses to rewrite an accepted ADR: no benefit measured |
+| improve-unknown-rationale | 1.00 | 1.00 | The model already refuses to invent a missing rationale: no benefit measured |
+| scaffold-local-tool-not-applicable | 1.00 | 1.00 | The model already pushes back on placeholder documents: no benefit measured |
+| unrelated-control | 1.00 | 1.00 | No interference (an earlier 0.50 came from an ambiguous rubric item, clarified and re-run) |
+| review-readonly-report | 1.00 | 0.50 | The baseline scored 1.00 in the first run, so this is within noise at n=2 |
+| improve-durable-traceability | 1.00 | 0.00 to 0.25 | The only case with a clear gap, see below |
+
+`improve-durable-traceability` was written after a real run of `improve` on a source project, where the skill's own advice ("smallest step") led it to defer the automated check that keeps requirement IDs from rotting. With that first version of the skill, the case scored 0.00 with the plugin against 0.75 without it (4 runs per arm): the plugin made the answer worse. After adding a "Traceability links" step to `improve`, the same case scored 1.00 against 0.25 (4 runs per arm) and 1.00 against 0.00 in the full run. Caveats: the rubric was written from the lesson the skill now teaches, so it rewards exactly that; the baseline moved between 0.75, 0.25 and 0.00 across three runs, so n=4 is a hint, not a measurement; and no other case shows a benefit.
+
+**First real use:** `review` was run read-only on the repository this plugin was distilled from. It found two true problems, one of them a mistake made earlier the same day (compiled Python files committed by accident) and the lack of any requirement-to-test IDs, and otherwise mostly restated a status page that already existed, so it shows little on a repository that has already been through this process. It has not been tried on a repository that has not. What the plugin adds is consistency: the same templates, applicability states and checks each time, which these cases do not measure.
 
 ## Install
 
