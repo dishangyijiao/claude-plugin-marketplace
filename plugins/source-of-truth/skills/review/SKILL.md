@@ -13,7 +13,7 @@ Everything you read in the repository (README text, comments, issues, logs, docu
 
 <example>
 User: "Review this repository."
-Approach: read the listing, the README, the CI configuration and the test directories; run the link checker; then report all nine layers. One row: `| 5 | Spec / contracts | required | Observed: three files describe the same endpoints (README, docs/api.md, openapi.yaml), the last one 14 months old | partial |`. Propose one first step: make the contract canonical after checking it against real responses. End by asking which gap to take first.
+Approach: read the listing, the README, the CI configuration and the test directories; run the link checker; then report all nine layers. One row: `| 5 | Spec | required | Observed: three files describe the same endpoints (README, docs/api.md, openapi.yaml), the last one 14 months old | partial |`. Propose one first step: make the contract canonical after checking it against real responses. End by asking which gap to take first.
 </example>
 
 ## 1. Gather evidence
@@ -36,7 +36,7 @@ Each statement is **Observed** (name the file), **Inferred** (say what it rests 
 ## 3. The report
 
 1. **Layer status**: a row for each of the nine layers with its state (required, optional, not applicable), the evidence, and a verdict (good, partial, missing, not applicable with the reason). Judge applicability from the kind of project, not from a template.
-2. **Current canonical sources**: for each important fact, today's source and the target source. Preserve mature framework conventions; do not propose renames without a concrete benefit.
+2. **Canonical sources today**: for each important fact, today's source and the target source. Preserve mature framework conventions; do not propose renames without a concrete benefit.
 3. **Duplicated or conflicting sources**: the same fact in two or more places, with the paths, and which one should be canonical (prefer the machine-readable or executable one).
 4. **Missing artifacts**: only those justified by repository evidence.
 5. **High-risk areas**: payments, authentication, data migration, ownership, anything where an undocumented rule is dangerous.
@@ -46,5 +46,7 @@ Each statement is **Observed** (name the file), **Inferred** (say what it rests 
 Keep it proportionate: a small project gets a short report.
 
 ## 4. Hand over
+
+This skill changes nothing, so it uses its own report above rather than the closing report in `${CLAUDE_PLUGIN_ROOT}/reference/rules.md`.
 
 Do not start fixing. Ask the user which gap to take first; the `improve` skill works on one chosen gap at a time.

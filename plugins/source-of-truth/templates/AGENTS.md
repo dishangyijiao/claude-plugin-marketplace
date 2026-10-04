@@ -24,7 +24,7 @@ __LINT_OR_CHECK_COMMAND__
 - Prefer machine-readable contracts over duplicated prose.
 - Do not modify the body of an accepted ADR; add a new ADR and mark the old one superseded.
 - When externally observable behavior changes, update the source listed in the sources table and its tests.
-- Do not invent the reasoning behind a historical decision. If you cannot confirm it, write `Needs confirmation`.
+- Do not invent the reasoning behind a historical decision. If you cannot confirm it, write `Needs confirmation`; a guess may appear only as a labelled hypothesis.
 
 ## Change Policy
 

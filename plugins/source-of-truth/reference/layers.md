@@ -48,7 +48,7 @@ In reviews and recovered documents, label each statement:
 
 - **Observed**: you saw it in a file, a test or a command result. Name the file.
 - **Inferred**: a judgment drawn from observations. Say what it rests on.
-- **Unknown**: not recoverable from the repository. Mark it `Needs confirmation` or `Historical rationale unavailable`. Never fill it in.
+- **Unknown**: not recoverable from the repository. Mark it `Needs confirmation` or `Historical rationale unavailable`. Never fill it in; a guess may appear only as a labelled hypothesis, never as fact.
 
 ## Traceability
 

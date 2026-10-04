@@ -1,4 +1,4 @@
-# Documentation and sources of truth
+# Sources table
 
 Principle: each fact has one source. Everywhere else references it and does not copy it. The repository records what the system should be; the runtime state is whatever the running system and its logs say.
 

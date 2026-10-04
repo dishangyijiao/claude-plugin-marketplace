@@ -1,11 +1,11 @@
 ---
 name: scaffold
-description: Use when starting a new project, or a repository with no documentation structure yet, to set up the nine-layer repository-as-source-of-truth - interview first, then create only the layers that apply, plus AGENTS.md and a table of where each fact lives. For a project that already has code and history, run review first.
+description: Use when starting a new project, or a repository with no documentation structure yet, to set up the nine-layer repository-as-source-of-truth - interview first, then create only the layers that apply, plus AGENTS.md and a sources table (where each fact lives). For a project that already has code and history, run review first.
 ---
 
 # Scaffold a new project
 
-Set up a repository so that a human or an AI engineer can tell what the system is for, why it is designed this way, how correctness is checked and where each fact lives, without chat history. Create only what the project really has; empty structure is noise.
+Set up a repository so that a human or an AI engineer can tell what the system is for, why it is designed this way, how correctness is checked and where each fact lives (the sources table), without chat history. Create only what the project really has; empty structure is noise.
 
 The layers, their applicability states and the evidence labels are in `${CLAUDE_PLUGIN_ROOT}/reference/layers.md`. The rules and the closing report are in `${CLAUDE_PLUGIN_ROOT}/reference/rules.md`. Document skeletons are in `${CLAUDE_PLUGIN_ROOT}/templates/`.
 
@@ -40,9 +40,9 @@ Go through the nine layers and propose one state each: required, optional or not
 Using the templates, create only:
 
 - `AGENTS.md` (project instructions, read order, verification and safety rules), adapted to the real commands.
-- The sources table (where each fact lives) and the status table with all nine layers and their states.
+- The sources table and the status table with all nine layers and their states.
 - A PRD draft from the interview, with unknowns marked.
-- An ADR only for a decision that has really been made (for example the chosen stack), with the reason as the user gave it. Do not invent alternatives.
+- An ADR only for a decision that has really been made (for example the chosen stack), with the reason as the user gave it. Do not invent alternatives; an alternative the user did not mention may appear only as a labelled hypothesis.
 - Requirements, specs or contracts only when the user has behavior to state now. Otherwise leave them to later steps.
 
 Match the project's language and naming conventions. Do not commit unless the user asks.
@@ -53,4 +53,4 @@ Tell the user that `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/check_markdown_links.p
 
 ## 6. Report
 
-Use the closing report from `${CLAUDE_PLUGIN_ROOT}/reference/rules.md`: files created, the state and reason of every layer, what is marked `Needs confirmation`, checks run, follow-up. Say what was not verified.
+Use the closing report from `${CLAUDE_PLUGIN_ROOT}/reference/rules.md`: files changed (created), source-of-truth impact (the state and reason of every layer), behavior impact (none), checks executed, unresolved uncertainty (what is marked `Needs confirmation`), follow-up. Say what was not verified.

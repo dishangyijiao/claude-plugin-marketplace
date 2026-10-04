@@ -4,7 +4,7 @@
 
 Proposed | Accepted | Deprecated | Superseded by __ADR_ID__ | Rejected
 
-Mark how well the record is known: `Confirmed by the owner`, `Needs confirmation`, or `Historical rationale unavailable`. Never fill a gap with a plausible reason. Candidate alternatives that were not recorded must be labelled as hypotheses.
+Mark how well the record is known: `Confirmed by the owner`, `Needs confirmation`, or `Historical rationale unavailable`. Never fill a gap with a plausible reason. Candidate alternatives that were not recorded may appear only as labelled hypotheses.
 
 ## Context
 
