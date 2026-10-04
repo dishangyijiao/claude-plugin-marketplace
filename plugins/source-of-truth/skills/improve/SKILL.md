@@ -30,10 +30,23 @@ One purpose per step: no unrelated refactors, no renames of mature directories, 
 - Update the sources table and the status table when the step changes where a fact lives.
 - Never weaken or delete a test to make a step pass.
 
-## 4. Verify
+## 4. Traceability links
+
+When the gap is traceability (requirement identifiers on tests, links from specs to code), the identifiers and the check that keeps them alive are one step. Never add identifiers now and leave the check for later; unchecked links rot silently.
+
+- Tag only the tests that guard a stated acceptance criterion, and say which criterion each one guards. Leave unrelated tests untagged without annotating them; tagging everything mechanically hides the ones that matter.
+- Add an automated check inside the project's existing test suite, written test-first. It must fail when:
+  1. a cited identifier does not exist in the requirements document (every identifier cited in code or tests is looked up),
+  2. a test that should carry its identifier loses its tag, named explicitly so that deleting the tag turns a test red,
+  3. a named test is renamed or misspelled, so the check fails loudly instead of passing without checking anything.
+- List the requirements and tests that remain untagged as a known gap in the status document. Do not claim full traceability.
+
+## 5. Verify
 
 Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/check_markdown_links.py <repo>` after documentation changes, and the project's own tests or checks when anything executable was touched. If a check could not run, say so; do not claim the step is done before the checks have run.
 
-## 5. Report and stop
+## 6. Report and stop
+
+Before reporting, read `git diff --stat` and make sure every file and change you describe is really in it, and that nothing is claimed that is not. A step that failed silently must not appear in the report as done.
 
 Use the closing report: files changed, source-of-truth impact, behavior impact, checks executed with results, unresolved uncertainty, follow-up. Do not commit or merge unless the user asks. Offer the next gap from the review.
