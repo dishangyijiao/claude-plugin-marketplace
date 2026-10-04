@@ -21,7 +21,7 @@ FORBIDDEN = {
 }
 # Project/host names that must never be baked into the shared plugin. Kept as
 # fragments joined at runtime so this file does not trip its own check.
-FORBIDDEN_WORDS = ["new" + "-magnet", "right" + "here", "hao" + "lab", "1pass" + "word", "magne" + "tu"]
+FORBIDDEN_WORDS = ["new" + "-magnet", "right" + "here", "hao" + "lab", "1pass" + "word", "magne" + "tu", "sound" + "key"]
 
 # Commands a read-only audit template must never contain.
 DESTRUCTIVE = [r"\brm\s+-", r"\bprune\b", r"volume\s+rm", r"\bkill\b", r"\bdrop\s+database\b", r"\bmkfs\b"]
