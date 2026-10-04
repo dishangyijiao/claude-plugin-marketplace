@@ -1,6 +1,6 @@
 # claude-plugin-marketplace
 
-A Claude Code plugin marketplace. One plugin so far: `plugins/ci-perf`. Rules live here only; `CLAUDE.md` just imports this file.
+A Claude Code plugin marketplace. Two plugins so far: `plugins/ci-perf` and `plugins/source-of-truth`. Rules live here only; `CLAUDE.md` just imports this file.
 
 ## Layout
 
@@ -9,6 +9,7 @@ A Claude Code plugin marketplace. One plugin so far: `plugins/ci-perf`. Rules li
 - `plugins/ci-perf/skills/*/SKILL.md`: the three skills; bundled files are referenced as `${CLAUDE_PLUGIN_ROOT}/...`, never as bare relative paths.
 - `plugins/ci-perf/scripts/`: standard-library Python, read-only.
 - `plugins/ci-perf/evals/`: default `claude plugin eval` suite. `evals-extra/` holds the script smoke test that needs `Bash` and `Write`.
+- `plugins/source-of-truth/`: the repository-as-source-of-truth playbook. `skills/{scaffold,review,improve}/SKILL.md`; `reference/` (layers and rules) and `templates/` (document skeletons), always referenced as `${CLAUDE_PLUGIN_ROOT}/...`; `scripts/check_markdown_links.py` (standard library, read-only, tested in `tests/test_check_markdown_links.py`); `evals/` (not yet run). Structure is tested in `tests/test_source_of_truth.py`. Content must stay free of any real project's name.
 - `tests/test_properties.py`: property tests, standard library only: seeded `random.Random`, so a failure names the seed and can be replayed. Use an independent model, a metamorphic check (the answer must not change) or hostile input; do not let the model call the code under test.
 - `tools/mutate.py`: the standard-library mutation runner (tests in `tests/test_mutate.py`). Development tool, not part of the plugin.
 - `README.md` (English, primary) and `README.zh-CN.md` (Chinese): keep numbers, paths and flags identical in both.
@@ -21,7 +22,7 @@ A Claude Code plugin marketplace. One plugin so far: `plugins/ci-perf`. Rules li
 
 ## Development method: strict TDD
 
-Every behavior change to code under `plugins/ci-perf/scripts/` (new feature, bug fix, hardening) follows red, green, refactor, in this order:
+Every behavior change to code under `plugins/*/scripts/` (new feature, bug fix, hardening) follows red, green, refactor, in this order:
 
 1. **Red**: write the failing test first and run it. It must fail for the reason you expect (an assertion about the new behavior, not an import error or typo). Do not touch production code until you have seen this failure.
 2. **Green**: write the smallest change that makes that test pass, then run the whole suite.
@@ -47,7 +48,7 @@ Rules:
 
   Current baseline: 100% line and branch for both scripts. New code must not lower it.
 - A test for behavior that already exists passes at once, so it cannot show red. Prove it guards the code by mutation: `python3 tools/mutate.py plugins/ci-perf/scripts/NAME.py --tests tests.test_NAME tests.test_properties` changes the script one step at a time in throwaway copies and lists the mutants the suite did not notice (`--list` shows them without running, `--allow N` accepts N known equivalents). Every survivor is either a missing test (add it) or an equivalent mutant (say why in the commit message). For a single line it is enough to break it by hand, see the test fail, and restore the line (never with `git checkout` on a file that has uncommitted work). Say in the report which tests were checked this way.
-- Run the mutation tool again on a script you changed. Current baseline, all equivalent mutants: `audit_runs_on.py` 6 survivors (use `--allow 6`), `ci_timing.py` 8 (`--allow 8`), `tools/mutate.py` 20 (`--allow 20`, run against `tests.test_mutate`). A new survivor is a missing test until you have shown it is equivalent.
+- Run the mutation tool again on a script you changed. Current baseline, all equivalent mutants: `audit_runs_on.py` 6 survivors (use `--allow 6`), `ci_timing.py` 8 (`--allow 8`), `tools/mutate.py` 20 (`--allow 20`, run against `tests.test_mutate`). `source-of-truth/scripts/check_markdown_links.py` 4 (`--allow 4`, run against `tests.test_check_markdown_links`). A new survivor is a missing test until you have shown it is equivalent.
 
 History note: versions up to 0.1.1 were written test-alongside-code, not test-first. The coverage gaps left at 0.1.1 were closed afterwards, and the work was replayed as separate commits so the order is visible: a green `test:` commit for existing behavior (mutation-checked), a `test(red):` commit with 7 failing tests, then the `fix:` commit that turns them green. Earlier commits cannot show that order.
 
@@ -64,6 +65,7 @@ History note: versions up to 0.1.1 were written test-alongside-code, not test-fi
 python3 -m unittest discover -s tests
 claude plugin validate .
 claude plugin validate plugins/ci-perf
+claude plugin validate plugins/source-of-truth
 ```
 
 Evals (`claude plugin eval`) call a model with your credentials and cost money; see the README before running them.

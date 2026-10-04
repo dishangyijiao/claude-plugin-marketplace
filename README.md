@@ -34,14 +34,33 @@ Templates (run them from a throwaway branch with `on: push`, then delete the bra
 - `plugins/ci-perf/skills/self-hosted-runner-health/templates/runner-readonly-audit.yml`: read-only audit of the runner host (disk, containers, volumes)
 - `plugins/ci-perf/skills/flaky-test-hunt/templates/repeat-tests.yml`: run the tests N times and keep the full log of every round
 
+## Plugin: `source-of-truth`
+
+A playbook for keeping a repository the source of truth for a system's intended state, across nine engineering layers: PRD, requirements, ADR, architecture, spec, code, tests, deploy, observe. Core principles: **one canonical source per fact, executable truth over prose, never invent a missing decision, and a layer that does not apply is recorded with a reason instead of filled with placeholders.**
+
+| Skill | When to use it |
+|---|---|
+| `source-of-truth:scaffold` | A new project: interview first, then create only the layers that apply, plus `AGENTS.md` and a table of where each fact lives |
+| `source-of-truth:review` | An existing project: a read-only audit of the nine layers that finds missing, duplicated or conflicting sources and proposes one small first step |
+| `source-of-truth:improve` | After a review: close one chosen gap (architecture overview, ADR, requirement, spec, contract, agent instructions) as one reviewable step, without changing behavior |
+
+Bundled files: `reference/layers.md` (the layers, three applicability states, evidence labels), `reference/rules.md` (migration rules, order of work, definition of done), seven document templates in `templates/`, and a read-only, standard-library link checker:
+
+```bash
+python3 plugins/source-of-truth/scripts/check_markdown_links.py <repo directory>   # exit 0 ok, 1 broken links, 2 usage error
+```
+
+The evaluation cases in `plugins/source-of-truth/evals/` have **not been run yet**; no benefit over the no-plugin baseline has been measured for this plugin.
+
 ## Install
 
 ```bash
 claude plugin marketplace add dishangyijiao/claude-plugin-marketplace
 claude plugin install ci-perf@dishangyijiao-plugins
+claude plugin install source-of-truth@dishangyijiao-plugins
 ```
 
-Try it locally without installing: `claude --plugin-dir plugins/ci-perf`
+Try it locally without installing: `claude --plugin-dir plugins/ci-perf` or `claude --plugin-dir plugins/source-of-truth`
 
 ## Development
 
@@ -51,6 +70,8 @@ python3 tools/mutate.py plugins/ci-perf/scripts/audit_runs_on.py --tests tests.t
 claude plugin validate .                  # marketplace manifest
 claude plugin validate plugins/ci-perf    # plugin manifest
 claude plugin validate plugins/ci-perf/skills
+claude plugin validate plugins/source-of-truth
+claude plugin validate plugins/source-of-truth/skills
 ```
 
 `tests/test_repo_hygiene.py` rejects internal IPs, tokens, keys, personal email addresses, project/host names, and any delete-style command in the audit templates. **Before adding anything to this repo, ask: is it generic, and is it read-only?**

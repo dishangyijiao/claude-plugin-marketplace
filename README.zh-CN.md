@@ -33,14 +33,33 @@ python3 plugins/ci-perf/scripts/audit_runs_on.py <仓库目录>
 - `plugins/ci-perf/skills/self-hosted-runner-health/templates/runner-readonly-audit.yml`：只读审计 runner 主机（磁盘、容器、卷）
 - `plugins/ci-perf/skills/flaky-test-hunt/templates/repeat-tests.yml`：重复运行 N 次并保留每一轮完整日志
 
+## 插件：`source-of-truth`
+
+让仓库成为系统"预期状态"的唯一事实来源的手册，覆盖九层工程：PRD、需求、ADR、架构、规格、代码、测试、部署、观测。核心原则：**每个事实只有一个权威来源；能用可执行的就不用文字；不编造缺失的决策；不适用的层写明原因，而不是塞占位文档。**
+
+| 技能 | 什么时候用 |
+|---|---|
+| `source-of-truth:scaffold` | 新项目：先访谈，再只建适用的层，加上 `AGENTS.md` 和"事实在哪里"的对照表 |
+| `source-of-truth:review` | 已有项目：只读地按九层审查，找出缺失、重复或冲突的来源，并给出一个小的第一步 |
+| `source-of-truth:improve` | 审查之后：一次只补一个缺口（架构概览、ADR、需求、规格、契约、代理指令），一步可独立评审，不改变行为 |
+
+自带文件：`reference/layers.md`（九层、三种适用状态、证据标签）、`reference/rules.md`（迁移规则、工作顺序、完成标准）、`templates/` 里的七份文档模板，以及一个只读、仅用标准库的链接检查脚本：
+
+```bash
+python3 plugins/source-of-truth/scripts/check_markdown_links.py <仓库目录>   # 退出码 0 正常，1 有失效链接，2 用法错误
+```
+
+`plugins/source-of-truth/evals/` 里的评测用例**还没有运行过**；这个插件相对于无插件基线的收益尚未测量。
+
 ## 安装
 
 ```bash
 claude plugin marketplace add dishangyijiao/claude-plugin-marketplace
 claude plugin install ci-perf@dishangyijiao-plugins
+claude plugin install source-of-truth@dishangyijiao-plugins
 ```
 
-本地试用（不安装）：`claude --plugin-dir plugins/ci-perf`
+本地试用（不安装）：`claude --plugin-dir plugins/ci-perf` 或 `claude --plugin-dir plugins/source-of-truth`
 
 ## 开发
 
@@ -50,6 +69,8 @@ python3 tools/mutate.py plugins/ci-perf/scripts/audit_runs_on.py --tests tests.t
 claude plugin validate .                  # 市场清单
 claude plugin validate plugins/ci-perf    # 插件清单
 claude plugin validate plugins/ci-perf/skills
+claude plugin validate plugins/source-of-truth
+claude plugin validate plugins/source-of-truth/skills
 ```
 
 `tests/test_repo_hygiene.py` 会拦截：内网 IP、令牌、密钥、个人邮箱、项目/主机名，以及审计模板里的任何删除类命令。**往这个仓库加内容之前先想：它是否通用、是否只读。**
