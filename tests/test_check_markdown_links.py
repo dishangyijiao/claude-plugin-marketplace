@@ -3,6 +3,7 @@
 import hashlib
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -48,6 +49,17 @@ class LinkExtractionTests(unittest.TestCase):
     def test_links_inside_inline_code_are_examples_not_links(self):
         self.assertEqual(list(links.markdown_links("Write `[text](path.md)` like [this](real.md).")), ["real.md"])
 
+    def test_an_indented_fence_still_hides_the_links_inside_it(self):
+        text = "   ```\n[example](example.md)\n   ```\n[after](after.md)\n"
+        self.assertEqual(list(links.markdown_links(text)), ["after.md"])
+
+    def test_a_shorter_fence_inside_a_longer_one_does_not_close_it(self):
+        text = "````\n   ```\n[example](example.md)\n````\n[after](after.md)\n"
+        self.assertEqual(list(links.markdown_links(text)), ["after.md"])
+
+    def test_a_protocol_relative_url_is_external(self):
+        self.assertEqual(list(links.markdown_links("[cdn](//example.com/x.js) [local](x.md)")), ["x.md"])
+
     def test_an_anchor_only_link_is_a_local_link(self):
         self.assertEqual(list(links.markdown_links("[top](#top)")), ["#top"])
 
@@ -84,6 +96,12 @@ class CheckDocumentsTests(unittest.TestCase):
             errors = links.check_documents(root / "inner", [root / "inner" / "README.md"])
         self.assertEqual(errors, ["README.md: link escapes repository: ../../outside.md"])
 
+    def test_every_problem_in_a_document_is_reported_not_only_the_first(self):
+        directory, root = make_repo({"inner/README.md": "[a](../../out.md) [b](gone.md)\n"})
+        with directory:
+            errors = links.check_documents(root / "inner", [root / "inner" / "README.md"])
+        self.assertEqual(errors, ["README.md: link escapes repository: ../../out.md", "README.md: missing link target: gone.md"])
+
     def test_a_directory_target_is_accepted_without_an_anchor_check(self):
         directory, root = make_repo({"README.md": "[docs](docs/)\n", "docs/guide.md": "# Guide\n"})
         with directory:
@@ -97,6 +115,14 @@ class DiscoveryTests(unittest.TestCase):
         with directory:
             found = [path.relative_to(root).as_posix() for path in links.markdown_documents(root)]
         self.assertEqual(found, ["docs/guide.md"])
+
+
+    def test_every_generated_or_dependency_directory_is_skipped(self):
+        skipped = [".git", ".claude", "coverage", "node_modules", "target", "vendor", "dist", "build", "venv", ".venv", ".export-venv"]
+        directory, root = make_repo({f"{name}/notes.md": "# Notes\n" for name in skipped} | {"keep.md": "# Keep\n"})
+        with directory:
+            found = [path.relative_to(root).as_posix() for path in links.markdown_documents(root)]
+        self.assertEqual(found, ["keep.md"])
 
 
 class CommandLineTests(unittest.TestCase):
@@ -128,6 +154,34 @@ class CommandLineTests(unittest.TestCase):
         code, out, err = run_main(["/nonexistent/path/for/the/check"])
         self.assertEqual((code, out), (2, ""))
         self.assertIn("not a directory", err)
+
+    def test_without_arguments_it_reads_the_process_arguments(self):
+        directory, root = make_repo({"README.md": "# Only\n"})
+        saved = sys.argv
+        sys.argv = ["check_markdown_links.py", str(root)]
+        try:
+            with directory:
+                code, out, _ = run_main(None)
+        finally:
+            sys.argv = saved
+        self.assertEqual((code, out), (0, "Checked local Markdown links in 1 file.\n"))
+
+    def test_more_than_one_argument_is_a_usage_error(self):
+        code, out, err = run_main(["one", "two"])
+        self.assertEqual((code, out, err), (2, "", "usage: check_markdown_links.py [REPO_DIR]\n"))
+
+    def test_every_problem_is_printed_on_its_own_line(self):
+        directory, root = make_repo({"README.md": "[a](a.md) [b](b.md)\n"})
+        with directory:
+            _, _, err = run_main([str(root)])
+        self.assertEqual(err, "README.md: missing link target: a.md\nREADME.md: missing link target: b.md\n")
+
+    def test_running_the_script_directly_checks_and_sets_the_exit_status(self):
+        directory, root = make_repo({"README.md": "[gone](gone.md)\n"})
+        with directory:
+            result = subprocess.run([sys.executable, str(SCRIPT), str(root)], capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+        self.assertIn("missing link target: gone.md", result.stderr)
 
     def test_it_never_modifies_the_files_it_reads(self):
         directory, root = make_repo({"README.md": "[gone](gone.md)\n", "guide.md": "# Guide\n"})
