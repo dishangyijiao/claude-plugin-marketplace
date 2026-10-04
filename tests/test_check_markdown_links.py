@@ -122,7 +122,7 @@ class CommandLineTests(unittest.TestCase):
                 code, out, _ = run_main([])
         finally:
             os.chdir(previous)
-        self.assertEqual((code, out), (0, "Checked local Markdown links in 1 files.\n"))
+        self.assertEqual((code, out), (0, "Checked local Markdown links in 1 file.\n"))
 
     def test_a_missing_directory_is_a_usage_error(self):
         code, out, err = run_main(["/nonexistent/path/for/the/check"])
