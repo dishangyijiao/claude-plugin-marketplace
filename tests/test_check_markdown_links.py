@@ -82,6 +82,18 @@ class LinkExtractionTests(unittest.TestCase):
         text = "```\n```python\n[x](inside.md)\n```\n[y](after.md)\n"
         self.assertEqual(list(links.markdown_links(text)), ["after.md"])
 
+    def test_three_backticks_followed_by_text_with_backticks_are_a_code_span_not_a_fence(self):
+        self.assertEqual(list(links.markdown_links("```inline``` and [x](real.md)\n[y](next.md)\n")), ["real.md", "next.md"])
+
+    def test_an_indented_run_of_backticks_with_text_after_it_is_a_code_span_too(self):
+        self.assertEqual(list(links.markdown_links("   ```inline``` and [x](real.md)\n[y](next.md)\n")), ["real.md", "next.md"])
+
+    def test_a_tilde_fence_may_have_backticks_in_its_info_string(self):
+        self.assertEqual(list(links.markdown_links("~~~ a`b\n[x](inside.md)\n~~~\n[y](after.md)\n")), ["after.md"])
+
+    def test_a_fence_of_another_kind_inside_a_fence_does_not_close_it(self):
+        self.assertEqual(list(links.markdown_links("```\n~~~\n[x](inside.md)\n```\n[y](after.md)\n")), ["after.md"])
+
     def test_front_matter_is_not_searched_for_links(self):
         self.assertEqual(list(links.markdown_links('---\nexample: "[x](missing.md)"\n---\n# T\n[y](real.md)\n')), ["real.md"])
 
@@ -217,7 +229,7 @@ class RobustnessTests(unittest.TestCase):
         with directory:
             (root / "bad.md").write_bytes(b"\xff\xfe not utf-8")
             errors = links.check_documents(root, [root / "bad.md", root / "ok.md"])
-        self.assertEqual(errors, ["bad.md: cannot read the file (UnicodeDecodeError)", "ok.md: missing link target: gone.md"])
+        self.assertEqual(errors, ["bad.md: cannot read the file as UTF-8 text", "ok.md: missing link target: gone.md"])
 
     def test_a_document_that_is_a_symlink_to_outside_the_repository_is_skipped(self):
         outside = tempfile.TemporaryDirectory()
@@ -228,6 +240,23 @@ class RobustnessTests(unittest.TestCase):
             (root / "README.md").symlink_to(secret)
             errors = links.check_documents(root, [root / "README.md"])
         self.assertEqual(errors, ["README.md: skipped, it resolves outside the repository"])
+
+    def test_a_skipped_document_does_not_stop_the_others_from_being_checked(self):
+        outside = tempfile.TemporaryDirectory()
+        directory, root = make_repo({"b.md": "[g](gone.md)\n"})
+        with directory, outside:
+            secret = Path(outside.name) / "secret.md"
+            secret.write_text("x", encoding="utf-8")
+            (root / "a.md").symlink_to(secret)
+            errors = links.check_documents(root, [root / "a.md", root / "b.md"])
+        self.assertEqual(errors, ["a.md: skipped, it resolves outside the repository", "b.md: missing link target: gone.md"])
+
+    def test_only_markdown_files_are_documents_and_a_broken_symlink_is_not_one(self):
+        directory, root = make_repo({"README.md": "# R\n", "notes.txt": "[x](gone.md)", "data.json": "{}"})
+        with directory:
+            (root / "dangling.md").symlink_to(root / "nowhere")
+            found = [path.name for path in links.markdown_documents(root)]
+        self.assertEqual(found, ["README.md"])
 
     def test_a_directory_named_like_a_document_is_not_read(self):
         directory, root = make_repo({"keep.md": "# Keep\n"})

@@ -52,6 +52,6 @@ Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/check_markdown_links.py <repo>` after
 
 ## 6. Report and stop
 
-Before reporting, read `git diff --stat` and make sure every file and change you describe is really in it, and that nothing is claimed that is not. A step that failed silently must not appear in the report as done.
+Before reporting, run `git status --short`, `git diff --stat` and `git diff --cached --stat` (a new file shows only in the first, a staged change only in the last), read each new file you created, and make sure every file and change you describe is really there and that nothing is claimed that is not. A step that failed silently must not appear in the report as done.
 
 Use the closing report: files changed, source-of-truth impact, behavior impact, checks executed with results, unresolved uncertainty, follow-up. Do not commit or merge unless the user asks. Offer the next gap from the review.
