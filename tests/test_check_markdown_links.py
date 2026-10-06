@@ -94,6 +94,18 @@ class AnchorTests(unittest.TestCase):
         text = "| a | b |\n|---|---|\n| 1 | 2 |\n\ntext\n\n---\n"
         self.assertEqual(links.heading_anchors(text), set())
 
+    def test_a_front_matter_block_is_not_a_heading(self):
+        # `title: x` over the closing `---` would otherwise look like a setext heading and add a false anchor.
+        self.assertEqual(links.heading_anchors("---\ntitle: x\ndraft: true\n---\n# Real\n"), {"real"})
+
+    def test_a_list_item_or_quote_over_a_rule_is_not_a_heading(self):
+        for text in ("- item\n---\n", "* item\n---\n", "+ item\n---\n", "1. item\n---\n", "2) item\n---\n", "> quote\n---\n"):
+            self.assertEqual(links.heading_anchors(text), set(), repr(text))
+
+    def test_a_plain_text_line_over_a_rule_is_a_heading(self):
+        self.assertEqual(links.heading_anchors("Plain line\n---\n"), {"plain-line"})
+        self.assertEqual(links.heading_anchors("Starts with 3 dashes\n---\n"), {"starts-with-3-dashes"})
+
     def test_html_anchors_with_a_name_or_an_id_are_anchors(self):
         text = '<a name="custom-name"></a>\n<a id=\'other-id\'>x</a>\n<div id="box"></div>\n'
         self.assertEqual(links.heading_anchors(text), {"custom-name", "other-id", "box"})

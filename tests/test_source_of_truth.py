@@ -51,7 +51,7 @@ class SkillTests(unittest.TestCase):
     def test_no_skill_uses_the_vague_words_nlpm_flags(self):
         for name in SKILLS:
             body = read(PLUGIN / "skills" / name / "SKILL.md")
-            for word in ["several", "relevant", "various", "some", "many", "appropriate"]:
+            for word in ["several", "relevant", "various", "some", "many", "appropriate", "often", "usually", "typically", "generally", "frequently"]:
                 self.assertIsNone(re.search(rf"(?i)\b{word}\b", body), f"{name}: {word}")
 
     def test_review_is_read_only_and_says_so(self):
