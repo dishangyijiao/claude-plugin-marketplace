@@ -33,14 +33,62 @@ python3 plugins/ci-perf/scripts/audit_runs_on.py <仓库目录>
 - `plugins/ci-perf/skills/self-hosted-runner-health/templates/runner-readonly-audit.yml`：只读审计 runner 主机（磁盘、容器、卷）
 - `plugins/ci-perf/skills/flaky-test-hunt/templates/repeat-tests.yml`：重复运行 N 次并保留每一轮完整日志
 
+## 插件：`source-of-truth`
+
+让仓库成为系统"预期状态"的唯一事实来源的手册，覆盖九层工程：PRD、需求、ADR、架构、规格、代码、测试、部署、观测。核心原则：**每个事实只有一个权威来源；能用可执行的就不用文字；不编造缺失的决策；不适用的层写明原因，而不是塞占位文档。**
+
+| 技能 | 什么时候用 |
+|---|---|
+| `source-of-truth:scaffold` | 新项目：先访谈，再只建适用的层，加上 `AGENTS.md` 和"事实在哪里"的对照表 |
+| `source-of-truth:review` | 已有项目：只读地按九层审查，找出缺失、重复或冲突的来源，并给出一个小的第一步 |
+| `source-of-truth:improve` | 审查之后：一次只补一个缺口（架构概览、ADR、需求、规格、契约、代理指令），一步可独立评审，不改变行为 |
+
+自带文件：`reference/layers.md`（九层、三种适用状态、证据标签）、`reference/rules.md`（迁移规则、工作顺序、完成标准）、`templates/` 里的八份文档模板，以及一个只读、仅用标准库的链接检查脚本：
+
+```bash
+python3 plugins/source-of-truth/scripts/check_markdown_links.py <仓库目录>   # 退出码 0 正常，1 有失效链接，2 用法错误
+```
+
+**这个插件的评测（6 个用例；每次运行每组 2 次，约 2.4 美元；下面每个数字都是实测，不是承诺）：**
+
+最新结果，在 Codex 评审这个 PR 之后的修复完成后（这一版的第一次完整运行有两个用例因额度用完而无效，已单独重跑）：
+
+| 用例 | 装插件 | 不装 | 解读 |
+|---|---|---|---|
+| improve-accepted-adr-immutable | 1.00 | 1.00 | 模型本来就不会改写已接受的 ADR：没有测到收益 |
+| improve-unknown-rationale | 1.00 | 1.00 | 模型本来就不会编造缺失的原因：没有测到收益 |
+| scaffold-local-tool-not-applicable | 1.00 | 0.00 | 这个用例的基线四次运行分别是 1.00、0.50、1.00、0.00，所以这个差距在噪声范围内 |
+| review-readonly-report | 1.00 | 1.00 | 没有差别 |
+| unrelated-control | 1.00 | 1.00 | 没有干扰（之前的 0.50 来自评分标准里有歧义的一条，澄清后重跑） |
+| improve-durable-traceability | 1.00 | 0.00 | 最常把两组分开的用例，而且不稳定，见下 |
+
+**唯一把两组分开的用例，按时间列出每一次测量：**
+
+| 时间点 | 技能状态 | 装插件 | 不装 |
+|---|---|---|---|
+| 第一次 | `improve` 的第一版 | 0.00 | 0.75（每组 4 次） |
+| 加入"追溯链接"一步后 | 加了这一步 | 1.00 | 0.25（每组 4 次） |
+| 同一天完整运行 | 加了这一步 | 1.00 | 0.00 |
+| 加入示例后 | 加了示例 | 0.50 | 1.00 |
+| 单独运行，每组 6 次 | 加了示例 | 0.83 | 0.50 |
+| 修掉一致性问题后 | 措辞修正 | 0.50 | 0.50 |
+| 评审修复后的两次完整运行 | 措辞与脚本修复 | 1.00 和 1.00 | 0.50 和 0.00 |
+
+八次测量里，五次偏向装插件，一次打平，两次偏向基线（其中第一次是修复之前的技能，它让回答变差了）。两组的单次结果都在 0.00 到 1.00 之间摆动，所以**收益有可能，但没有被证实**。这个用例写于在源项目上真实运行 `improve` 之后：技能自己的建议（"最小的一步"）让它把"防止需求 ID 腐烂的自动检查"推到了以后；评分标准是根据技能现在教的这条经验写的，所以它奖励的正是这一点。
+
+`nlpm:score` 给插件的四个文件都打了 100 分（之前是 100、90、88、88），这衡量的是技能写得怎么样，不是它有没有帮助。
+
+**`review` 的对照实验（每组 1 次，同样的只读工具，2 个仓库）：** 不装插件的一组只被告知九层的名字，别的什么都没说。两组都没有明显胜出。装插件的一组对适用性判断更好（在个人 dotfiles 仓库上，它把 PRD 和需求判为可选、可观测判为不适用，并建议补 `AGENTS.md`；基线则要求新建带编号需求的范围文档），列出了读过的内容并标注了未知项。基线找到了更多具体的跨文档冲突，我核实后确认属实（远程仓库仍指向旧项目名、文件数量过期、架构页缺两个门禁、两份文档给出不同的应用顺序），因为它读的文件更多；装插件的一组读得少，漏掉了这些。装插件的一组发现了被误提交的一对 `.pyc`，基线没发现。所以测到的效果是更合适的分寸和对证据的诚实，而不是更多发现。插件带来的是一致性：每次都用同样的模板、适用状态和检查，这些用例没有测量这一点。
+
 ## 安装
 
 ```bash
 claude plugin marketplace add dishangyijiao/claude-plugin-marketplace
 claude plugin install ci-perf@dishangyijiao-plugins
+claude plugin install source-of-truth@dishangyijiao-plugins
 ```
 
-本地试用（不安装）：`claude --plugin-dir plugins/ci-perf`
+本地试用（不安装）：`claude --plugin-dir plugins/ci-perf` 或 `claude --plugin-dir plugins/source-of-truth`
 
 ## 开发
 
@@ -50,6 +98,8 @@ python3 tools/mutate.py plugins/ci-perf/scripts/audit_runs_on.py --tests tests.t
 claude plugin validate .                  # 市场清单
 claude plugin validate plugins/ci-perf    # 插件清单
 claude plugin validate plugins/ci-perf/skills
+claude plugin validate plugins/source-of-truth
+claude plugin validate plugins/source-of-truth/skills
 ```
 
 `tests/test_repo_hygiene.py` 会拦截：内网 IP、令牌、密钥、个人邮箱、项目/主机名，以及审计模板里的任何删除类命令。**往这个仓库加内容之前先想：它是否通用、是否只读。**

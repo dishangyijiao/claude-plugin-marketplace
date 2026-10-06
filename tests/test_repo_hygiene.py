@@ -21,7 +21,7 @@ FORBIDDEN = {
 }
 # Project/host names that must never be baked into the shared plugin. Kept as
 # fragments joined at runtime so this file does not trip its own check.
-FORBIDDEN_WORDS = ["new" + "-magnet", "right" + "here", "hao" + "lab", "1pass" + "word", "magne" + "tu"]
+FORBIDDEN_WORDS = ["new" + "-magnet", "right" + "here", "hao" + "lab", "1pass" + "word", "magne" + "tu", "sound" + "key"]
 
 # Commands a read-only audit template must never contain.
 DESTRUCTIVE = [r"\brm\s+-", r"\bprune\b", r"volume\s+rm", r"\bkill\b", r"\bdrop\s+database\b", r"\bmkfs\b"]
@@ -83,7 +83,7 @@ class SkillBundledPathTests(unittest.TestCase):
     reference must use it and must resolve to a file that really exists.
     """
 
-    TOKEN = re.compile(r"[^\s`'\"()<>]*(?:scripts|templates)/[\w.\-]+")
+    TOKEN = re.compile(r"[^\s`'\"()<>]*(?:scripts|templates|reference)/[\w.\-]+")
     PREFIX = "${CLAUDE_PLUGIN_ROOT}/"
 
     def test_every_bundled_file_reference_uses_the_plugin_root_and_exists(self):
@@ -99,6 +99,13 @@ class SkillBundledPathTests(unittest.TestCase):
                 elif not (plugin_dir / token[len(self.PREFIX):]).exists():
                     problems.append(f"{skill.relative_to(ROOT)}: {token!r} does not exist")
         self.assertEqual(problems, [])
+
+
+class SkillFrontmatterTests(unittest.TestCase):
+    def test_no_skill_pre_approves_tools(self):
+        # allowed-tools grants permission instead of restricting it; evals pass tools explicitly.
+        offenders = [str(p.relative_to(ROOT)) for p in (ROOT / "plugins").glob("*/skills/*/SKILL.md") if "allowed-tools" in p.read_text()]
+        self.assertEqual(offenders, [])
 
 
 class ReadOnlyTemplateTests(unittest.TestCase):

@@ -1,0 +1,19 @@
+{
+  "name": "source-of-truth",
+  "version": "0.1.0",
+  "description": "Repository-as-source-of-truth playbook across nine engineering layers (PRD to observability): scaffold a new project, review an existing one against the layers, and fill the gaps one reviewable step at a time.",
+  "author": {
+    "name": "dishangyijiao",
+    "url": "https://github.com/dishangyijiao"
+  },
+  "keywords": [
+    "documentation",
+    "adr",
+    "requirements",
+    "traceability",
+    "agents-md"
+  ],
+  "license": "MIT",
+  "repository": "https://github.com/dishangyijiao/claude-plugin-marketplace",
+  "homepage": "https://github.com/dishangyijiao/claude-plugin-marketplace"
+}

@@ -34,14 +34,62 @@ Templates (run them from a throwaway branch with `on: push`, then delete the bra
 - `plugins/ci-perf/skills/self-hosted-runner-health/templates/runner-readonly-audit.yml`: read-only audit of the runner host (disk, containers, volumes)
 - `plugins/ci-perf/skills/flaky-test-hunt/templates/repeat-tests.yml`: run the tests N times and keep the full log of every round
 
+## Plugin: `source-of-truth`
+
+A playbook for keeping a repository the source of truth for a system's intended state, across nine engineering layers: PRD, requirements, ADR, architecture, spec, code, tests, deploy, observe. Core principles: **one canonical source per fact, executable truth over prose, never invent a missing decision, and a layer that does not apply is recorded with a reason instead of filled with placeholders.**
+
+| Skill | When to use it |
+|---|---|
+| `source-of-truth:scaffold` | A new project: interview first, then create only the layers that apply, plus `AGENTS.md` and a table of where each fact lives |
+| `source-of-truth:review` | An existing project: a read-only audit of the nine layers that finds missing, duplicated or conflicting sources and proposes one small first step |
+| `source-of-truth:improve` | After a review: close one chosen gap (architecture overview, ADR, requirement, spec, contract, agent instructions) as one reviewable step, without changing behavior |
+
+Bundled files: `reference/layers.md` (the layers, three applicability states, evidence labels), `reference/rules.md` (migration rules, order of work, definition of done), eight document templates in `templates/`, and a read-only, standard-library link checker:
+
+```bash
+python3 plugins/source-of-truth/scripts/check_markdown_links.py <repo directory>   # exit 0 ok, 1 broken links, 2 usage error
+```
+
+**Evaluation of this plugin (6 cases; each run is 2 runs per arm, about US$2.4; every number below was measured, none is a promise):**
+
+Latest results, after the fixes from a Codex review of this PR (the first full run of this version lost two cases to a usage limit; those two were re-run on their own):
+
+| Case | With plugin | Without | Reading |
+|---|---|---|---|
+| improve-accepted-adr-immutable | 1.00 | 1.00 | The model already refuses to rewrite an accepted ADR: no benefit measured |
+| improve-unknown-rationale | 1.00 | 1.00 | The model already refuses to invent a missing rationale: no benefit measured |
+| scaffold-local-tool-not-applicable | 1.00 | 0.00 | The baseline has scored 1.00, 0.50, 1.00 and 0.00 in four runs of this case, so this gap is within the noise |
+| review-readonly-report | 1.00 | 1.00 | No difference |
+| unrelated-control | 1.00 | 1.00 | No interference (an earlier 0.50 came from an ambiguous rubric item, clarified and re-run) |
+| improve-durable-traceability | 1.00 | 0.00 | The case that most often separates the arms, and not reliably, see below |
+
+**The one case that separates the arms, every measurement in order** (2 runs per arm unless noted):
+
+| When | Skill state | With | Without |
+|---|---|---|---|
+| first run | first version of `improve` | 0.00 | 0.75 (4 per arm) |
+| after adding the "Traceability links" step | with step | 1.00 | 0.25 (4 per arm) |
+| full run, same day | with step | 1.00 | 0.00 |
+| after adding worked examples | with examples | 0.50 | 1.00 |
+| alone, 6 per arm | with examples | 0.83 | 0.50 |
+| after the consistency fixes | fixed wording | 0.50 | 0.50 |
+| two full runs after the review fixes | wording and script fixes | 1.00 and 1.00 | 0.50 and 0.00 |
+
+Eight measurements: five favour the plugin, one is a tie and two favour the baseline (the first of those was the skill before the fix, which made the answer worse). Both arms swing between 0.00 and 1.00 from run to run, so **a benefit is possible but not established**. The case was written after a real run of `improve` on a source project, where the skill's own advice ("smallest step") led it to defer the automated check that keeps requirement IDs from rotting, and the rubric was written from the lesson the skill now teaches, so it rewards exactly that.
+
+`nlpm:score` rates all four plugin files 100 (before: 100, 90, 88, 88). That measures how the skills are written, not whether they help.
+
+**Control experiment for `review` (one run per arm, same read-only tools, 2 repositories):** the no-plugin arm was told the nine layer names and nothing else. Neither arm clearly won. The plugin arm judged applicability better (on a personal dotfiles repository it called PRD and requirements optional and observability not applicable, and proposed an `AGENTS.md`; the baseline asked for a new scope document with numbered requirements), listed what it had read, and marked unknowns. The baseline found more concrete cross-document conflicts that I verified as true (the remote still pointing at the old project name, a stale file count, an architecture page missing two gates, two docs giving different apply orders) because it read more files, while the plugin arm read fewer and missed them. The plugin arm found a tracked `.pyc` pair that the baseline missed. So the measured effect is better proportion and honesty about evidence, not more findings. What the plugin adds is consistency: the same templates, applicability states and checks each time, which these cases do not measure.
+
 ## Install
 
 ```bash
 claude plugin marketplace add dishangyijiao/claude-plugin-marketplace
 claude plugin install ci-perf@dishangyijiao-plugins
+claude plugin install source-of-truth@dishangyijiao-plugins
 ```
 
-Try it locally without installing: `claude --plugin-dir plugins/ci-perf`
+Try it locally without installing: `claude --plugin-dir plugins/ci-perf` or `claude --plugin-dir plugins/source-of-truth`
 
 ## Development
 
@@ -51,6 +99,8 @@ python3 tools/mutate.py plugins/ci-perf/scripts/audit_runs_on.py --tests tests.t
 claude plugin validate .                  # marketplace manifest
 claude plugin validate plugins/ci-perf    # plugin manifest
 claude plugin validate plugins/ci-perf/skills
+claude plugin validate plugins/source-of-truth
+claude plugin validate plugins/source-of-truth/skills
 ```
 
 `tests/test_repo_hygiene.py` rejects internal IPs, tokens, keys, personal email addresses, project/host names, and any delete-style command in the audit templates. **Before adding anything to this repo, ask: is it generic, and is it read-only?**

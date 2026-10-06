@@ -10,6 +10,11 @@
       "name": "ci-perf",
       "description": "Measure-first CI performance and reliability playbook for self-hosted runners: job/step timing and contention analysis, read-only runner audits, GitHub-hosted-minutes audit, and a repeat-run workflow that keeps full logs to catch intermittent test failures.",
       "source": "./plugins/ci-perf"
+    },
+    {
+      "name": "source-of-truth",
+      "description": "Repository-as-source-of-truth playbook across nine engineering layers: scaffold a new project, review an existing one against the layers (read-only), and fill the gaps one reviewable step at a time.",
+      "source": "./plugins/source-of-truth"
     }
   ]
 }
