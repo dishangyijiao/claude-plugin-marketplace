@@ -44,28 +44,42 @@ A playbook for keeping a repository the source of truth for a system's intended 
 | `source-of-truth:review` | An existing project: a read-only audit of the nine layers that finds missing, duplicated or conflicting sources and proposes one small first step |
 | `source-of-truth:improve` | After a review: close one chosen gap (architecture overview, ADR, requirement, spec, contract, agent instructions) as one reviewable step, without changing behavior |
 
-Bundled files: `reference/layers.md` (the layers, three applicability states, evidence labels), `reference/rules.md` (migration rules, order of work, definition of done), seven document templates in `templates/`, and a read-only, standard-library link checker:
+Bundled files: `reference/layers.md` (the layers, three applicability states, evidence labels), `reference/rules.md` (migration rules, order of work, definition of done), eight document templates in `templates/`, and a read-only, standard-library link checker:
 
 ```bash
 python3 plugins/source-of-truth/scripts/check_markdown_links.py <repo directory>   # exit 0 ok, 1 broken links, 2 usage error
 ```
 
-**Evaluation (6 cases, latest full run 2 runs per arm, about US$2.4; the traceability case was also run alone with 4 runs per arm):**
+**Evaluation of this plugin (6 cases; each run is 2 runs per arm, about US$2.4; every number below was measured, none is a promise):**
+
+Latest results, after the fixes from a Codex review of this PR (the first full run of this version lost two cases to a usage limit; those two were re-run on their own):
 
 | Case | With plugin | Without | Reading |
 |---|---|---|---|
 | improve-accepted-adr-immutable | 1.00 | 1.00 | The model already refuses to rewrite an accepted ADR: no benefit measured |
 | improve-unknown-rationale | 1.00 | 1.00 | The model already refuses to invent a missing rationale: no benefit measured |
-| scaffold-local-tool-not-applicable | 1.00 | 1.00 | The model already pushes back on placeholder documents: no benefit measured |
+| scaffold-local-tool-not-applicable | 1.00 | 0.00 | The baseline has scored 1.00, 0.50, 1.00 and 0.00 in four runs of this case, so this gap is within the noise |
+| review-readonly-report | 1.00 | 1.00 | No difference |
 | unrelated-control | 1.00 | 1.00 | No interference (an earlier 0.50 came from an ambiguous rubric item, clarified and re-run) |
-| review-readonly-report | 1.00 | 0.50 | The baseline scored 1.00 in the first run, so this is within noise at n=2 |
-| improve-durable-traceability | 1.00 | 0.00 to 0.25 | The only case with a clear gap, see below |
+| improve-durable-traceability | 1.00 | 0.00 | The case that most often separates the arms, and not reliably, see below |
 
-`improve-durable-traceability` was written after a real run of `improve` on a source project, where the skill's own advice ("smallest step") led it to defer the automated check that keeps requirement IDs from rotting. With that first version of the skill, the case scored 0.00 with the plugin against 0.75 without it (4 runs per arm): the plugin made the answer worse. After adding a "Traceability links" step to `improve`, the same case scored 1.00 against 0.25 (4 runs per arm) and 1.00 against 0.00 in the full run. Caveats: the rubric was written from the lesson the skill now teaches, so it rewards exactly that; the baseline moved between 0.75, 0.25 and 0.00 across three runs, so n=4 is a hint, not a measurement; and no other case shows a benefit. **Update after adding worked examples to the skills (nlpm findings):** the full run gave 0.50 with the plugin against 1.00 without on this case, and a separate 6-runs-per-arm run gave 0.83 against 0.50. Across all five runs of this case so far the plugin arm averages about 0.8 and the baseline about 0.5, but individual runs swing between 0.00 and 1.00 in both arms, so the gap is real in direction and unreliable in size. The `scaffold` baseline also swung from 1.00 to 0.00 between two full runs.
+**The one case that separates the arms, every measurement in order** (2 runs per arm unless noted):
 
-**Latest full run (2 runs per arm, about US$2.3, after fixing the contradictions and naming drift that `nlpm:check` found in the plugin's own files):** four cases tied at 1.00 against 1.00; `scaffold-local-tool-not-applicable` scored 1.00 against 0.50; `improve-durable-traceability` scored 0.50 against 0.50. No regression is visible, but at n=2 per arm none of these differences can be told from noise. `nlpm:score` rates all four plugin files 100 (before: 100, 90, 88, 88), which measures how the skills are written, not whether they help.
+| When | Skill state | With | Without |
+|---|---|---|---|
+| first run | first version of `improve` | 0.00 | 0.75 (4 per arm) |
+| after adding the "Traceability links" step | with step | 1.00 | 0.25 (4 per arm) |
+| full run, same day | with step | 1.00 | 0.00 |
+| after adding worked examples | with examples | 0.50 | 1.00 |
+| alone, 6 per arm | with examples | 0.83 | 0.50 |
+| after the consistency fixes | fixed wording | 0.50 | 0.50 |
+| two full runs after the review fixes | wording and script fixes | 1.00 and 1.00 | 0.50 and 0.00 |
 
-**First real use:** `review` was run read-only on the repository this plugin was distilled from. It found two true problems, one of them a mistake made earlier the same day (compiled Python files committed by accident) and the lack of any requirement-to-test IDs, and otherwise mostly restated a status page that already existed, so it shows little on a repository that has already been through this process. It has not been tried on a repository that has not. **Control experiment for `review` (one run per arm, same read-only tools, 2 repositories):** the no-plugin arm was told the nine layer names and nothing else. Neither arm clearly won. The plugin arm judged applicability better (on a personal dotfiles repository it called PRD and requirements optional and observability not applicable, and proposed an `AGENTS.md`; the baseline asked for a new scope document with numbered requirements), listed what it had read, and marked unknowns. The baseline found more concrete cross-document conflicts that I verified as true (the remote still pointing at the old project name, a stale file count, an architecture page missing two gates, two docs giving different apply orders) because it read more files, while the plugin arm read fewer and missed them. The plugin arm found a tracked `.pyc` pair that the baseline missed. So the measured effect is better proportion and honesty about evidence, not more findings. What the plugin adds is consistency: the same templates, applicability states and checks each time, which these cases do not measure.
+Eight measurements: five favour the plugin, one is a tie and two favour the baseline (the first of those was the skill before the fix, which made the answer worse). Both arms swing between 0.00 and 1.00 from run to run, so **a benefit is possible but not established**. The case was written after a real run of `improve` on a source project, where the skill's own advice ("smallest step") led it to defer the automated check that keeps requirement IDs from rotting, and the rubric was written from the lesson the skill now teaches, so it rewards exactly that.
+
+`nlpm:score` rates all four plugin files 100 (before: 100, 90, 88, 88). That measures how the skills are written, not whether they help.
+
+**Control experiment for `review` (one run per arm, same read-only tools, 2 repositories):** the no-plugin arm was told the nine layer names and nothing else. Neither arm clearly won. The plugin arm judged applicability better (on a personal dotfiles repository it called PRD and requirements optional and observability not applicable, and proposed an `AGENTS.md`; the baseline asked for a new scope document with numbered requirements), listed what it had read, and marked unknowns. The baseline found more concrete cross-document conflicts that I verified as true (the remote still pointing at the old project name, a stale file count, an architecture page missing two gates, two docs giving different apply orders) because it read more files, while the plugin arm read fewer and missed them. The plugin arm found a tracked `.pyc` pair that the baseline missed. So the measured effect is better proportion and honesty about evidence, not more findings. What the plugin adds is consistency: the same templates, applicability states and checks each time, which these cases do not measure.
 
 ## Install
 
