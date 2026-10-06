@@ -7,11 +7,13 @@ Read-only: it only reads `*.md` files. It reports links to files that do not exi
 links that leave the repository, and `#fragment`s that match no heading.
 
 Limits (it is a small regex reader, not a Markdown parser):
-  * only inline links `[text](target)` are checked; reference-style links and
-    autolinks are not,
+  * only inline links `[text](target)` are checked; reference-style links
+    (`[text][ref]`) and autolinks are not,
+  * a target may contain one level of parentheses (`docs/a_(b).md`); deeper nesting is cut short,
   * links inside fenced code blocks and inline code are treated as examples,
-  * heading anchors follow the GitHub slug rule for ATX (`#`) headings only: lower
-    case, punctuation removed, each space becomes one hyphen.
+  * anchors are the headings (ATX `# Title` and setext `Title` over `===` or `---`, numbered
+    together in document order, following the GitHub slug rule: lower case, punctuation
+    removed, each space becomes one hyphen) plus any `id=` or `name=` attribute of an HTML tag.
 
 Exit status: 0 all links resolve, 1 at least one problem, 2 usage error.
 """
@@ -23,8 +25,12 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
-HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
+# A target may hold one level of balanced parentheses, as in `docs/a_(b).md`.
+LINK = re.compile(r"(?<!!)\[[^\]]*\]\(((?:[^()]|\([^()]*\))+)\)")
+# An ATX heading (`# Title`) or a setext heading (a text line underlined with `===` or `---`), in one pattern so that
+# repeated titles are numbered in document order. The setext text line must not start with `#` or `|`.
+HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$|^(?![#|])(\S[^\n]*)\n(?:=+|-+)[ \t]*$", re.MULTILINE)
+HTML_ANCHOR = re.compile(r"<[A-Za-z][^>]*?\b(?:id|name)\s*=\s*[\"']([^\"']+)[\"']")
 INLINE_CODE = re.compile(r"(`+).+?\1")
 FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 IGNORED_DIRECTORIES = {".git", ".claude", "coverage", "node_modules", "target", "vendor", "dist", "build", "venv", ".venv", ".export-venv"}
@@ -59,12 +65,14 @@ def heading_anchors(text):
     """Return GitHub-style anchors for ATX headings, including duplicate suffixes."""
     anchors = set()
     counts = {}
-    for match in HEADING.finditer(without_code(text)):
-        heading = re.sub(r"[`*_~]", "", match.group(1)).lower().strip()
+    plain = without_code(text)
+    for match in HEADING.finditer(plain):
+        heading = re.sub(r"[`*_~]", "", match.group(1) or match.group(2)).lower().strip()
         slug = re.sub(r"[^\w -]", "", heading, flags=re.UNICODE).replace(" ", "-")
         count = counts.get(slug, 0)
         counts[slug] = count + 1
         anchors.add(f"{slug}-{count}" if count else slug)
+    anchors.update(match.group(1).lower() for match in HTML_ANCHOR.finditer(plain))
     return anchors
 
 

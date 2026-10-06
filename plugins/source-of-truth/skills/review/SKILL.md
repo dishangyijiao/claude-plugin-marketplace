@@ -27,7 +27,7 @@ Read only what is needed, and say what you read:
 - Operations: deployment files, infrastructure code, runbooks, alert and SLO definitions.
 - Where the same fact is written more than once.
 
-You may run read-only checks, for example `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/check_markdown_links.py <repo>` to find broken local links, or the project's own test command if it is safe to run. State what you ran.
+You may run read-only checks, for example `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/check_markdown_links.py <repo>` to find broken local links. Run the project's tests only if the user asks: they often write caches, coverage output or databases, and this skill changes nothing. State what you ran, and say that the test results were not checked if you did not run them.
 
 ## 2. Label everything
 
