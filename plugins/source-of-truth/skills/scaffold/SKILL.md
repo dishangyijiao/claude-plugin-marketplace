@@ -33,7 +33,7 @@ Anything the user cannot answer yet is written as `Needs confirmation`, never gu
 
 ## 3. Decide applicability with the user
 
-Go through the nine layers and propose one state each: required, optional or not applicable, with a reason. A personal tool usually has no deploy or observe layer; a service with users usually needs both. The user makes the final call. Not applicable layers get a row and a reason in the status table and no files.
+Go through the nine layers and propose one state each: required, optional or not applicable, with a reason. For a tool that runs on one person's machine, propose deploy and observe as not applicable unless the user says otherwise; for a service with users, propose both as required and ask what exists today. The user makes the final call. Not applicable layers get a row and a reason in the status table and no files.
 
 ## 4. Create the smallest useful skeleton
 

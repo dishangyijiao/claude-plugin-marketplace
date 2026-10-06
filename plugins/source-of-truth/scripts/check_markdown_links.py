@@ -11,6 +11,8 @@ Limits (it is a small regex reader, not a Markdown parser):
     (`[text][ref]`) and autolinks are not,
   * a target may contain one level of parentheses (`docs/a_(b).md`); deeper nesting is cut short,
   * links inside fenced code blocks and inline code are treated as examples,
+  * a setext heading is only the one line above its underline, so a paragraph of several lines gets the
+    anchor of its last line; a YAML front matter block at the top is skipped,
   * anchors are the headings (ATX `# Title` and setext `Title` over `===` or `---`, numbered
     together in document order, following the GitHub slug rule: lower case, punctuation
     removed, each space becomes one hyphen) plus any `id=` or `name=` attribute of an HTML tag.
@@ -28,8 +30,13 @@ from urllib.parse import unquote, urlsplit
 # A target may hold one level of balanced parentheses, as in `docs/a_(b).md`.
 LINK = re.compile(r"(?<!!)\[[^\]]*\]\(((?:[^()]|\([^()]*\))+)\)")
 # An ATX heading (`# Title`) or a setext heading (a text line underlined with `===` or `---`), in one pattern so that
-# repeated titles are numbered in document order. The setext text line must not start with `#` or `|`.
-HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$|^(?![#|])(\S[^\n]*)\n(?:=+|-+)[ \t]*$", re.MULTILINE)
+# repeated titles are numbered in document order. The setext text line must not look like a table row, a quote or a
+# list item (`-`, `*`, `+` or `1.` / `1)` followed by a space), which are not headings when a rule follows them.
+HEADING = re.compile(
+    r"^#{1,6}\s+(.+?)\s*#*\s*$|^(?![#|>]|[-*+]\s|\d+[.)]\s)(\S[^\n]*)\n(?:=+|-+)[ \t]*$",
+    re.MULTILINE,
+)
+FRONT_MATTER = re.compile(r"\A---[ \t]*\n.*?\n---[ \t]*(?:\n|\Z)", re.DOTALL)
 HTML_ANCHOR = re.compile(r"<[A-Za-z][^>]*?\b(?:id|name)\s*=\s*[\"']([^\"']+)[\"']")
 INLINE_CODE = re.compile(r"(`+).+?\1")
 FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
@@ -65,7 +72,7 @@ def heading_anchors(text):
     """Return GitHub-style anchors for ATX headings, including duplicate suffixes."""
     anchors = set()
     counts = {}
-    plain = without_code(text)
+    plain = FRONT_MATTER.sub("", without_code(text), count=1)
     for match in HEADING.finditer(plain):
         heading = re.sub(r"[`*_~]", "", match.group(1) or match.group(2)).lower().strip()
         slug = re.sub(r"[^\w -]", "", heading, flags=re.UNICODE).replace(" ", "-")
