@@ -86,6 +86,13 @@ class SkillTests(unittest.TestCase):
         self.assertRegex(body, r"(?i)loses? (its|the) (tag|identifier|id)")
         self.assertIn("git diff", body)
 
+    def test_improve_checks_its_report_against_status_and_both_diffs_and_reads_new_files(self):
+        # `git diff --stat` alone misses new untracked files (what improve creates most) and staged changes.
+        body = read(PLUGIN / "skills" / "improve" / "SKILL.md")
+        for needed in ["git status --short", "git diff --stat", "git diff --cached --stat"]:
+            self.assertIn(needed, body)
+        self.assertRegex(body, r"(?i)read (each|every) (new|created) file")
+
     def test_improve_uses_the_bundled_link_checker(self):
         self.assertIn("${CLAUDE_PLUGIN_ROOT}/scripts/check_markdown_links.py", read(PLUGIN / "skills" / "improve" / "SKILL.md"))
 
@@ -173,6 +180,13 @@ class ConsistencyTests(unittest.TestCase):
 
 
 class RegistrationTests(unittest.TestCase):
+    def test_both_readmes_state_how_many_templates_there_are(self):
+        count = len(list((PLUGIN / "templates").glob("*.md")))
+        english = {7: "seven", 8: "eight", 9: "nine"}[count]
+        chinese = {7: "七", 8: "八", 9: "九"}[count]
+        self.assertIn(f"{english} document templates", read(ROOT / "README.md"))
+        self.assertIn(f"{chinese}份文档模板", read(ROOT / "README.zh-CN.md"))
+
     def test_both_readmes_describe_the_plugin(self):
         for name in ["README.md", "README.zh-CN.md"]:
             body = read(ROOT / name)

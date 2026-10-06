@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -71,6 +72,28 @@ class LinkExtractionTests(unittest.TestCase):
         self.assertEqual(list(links.markdown_links('[a](docs/a_(b).md "The title")')), ["docs/a_(b).md"])
 
 
+    def test_an_external_target_that_cannot_be_parsed_is_skipped_not_fatal(self):
+        self.assertEqual(list(links.markdown_links("[x](http://[oops) [y](real.md)")), ["real.md"])
+
+    def test_a_code_span_may_run_over_several_lines(self):
+        self.assertEqual(list(links.markdown_links("`code\n[x](in-span.md)\nmore` [y](real.md)\n")), ["real.md"])
+
+    def test_a_fence_is_closed_only_by_a_fence_without_text_after_it(self):
+        text = "```\n```python\n[x](inside.md)\n```\n[y](after.md)\n"
+        self.assertEqual(list(links.markdown_links(text)), ["after.md"])
+
+    def test_front_matter_is_not_searched_for_links(self):
+        self.assertEqual(list(links.markdown_links('---\nexample: "[x](missing.md)"\n---\n# T\n[y](real.md)\n')), ["real.md"])
+
+    def test_a_badge_link_gives_its_target_and_not_the_image(self):
+        self.assertEqual(list(links.markdown_links("[![build](badge.svg)](docs/a.md)")), ["docs/a.md"])
+
+    def test_a_long_run_of_open_brackets_is_scanned_in_linear_time(self):
+        started = time.monotonic()
+        self.assertEqual(list(links.markdown_links("[" * 128000 + "](a")), [])
+        self.assertLess(time.monotonic() - started, 1.0)
+
+
 class AnchorTests(unittest.TestCase):
     def test_heading_anchors_normalize_text_and_disambiguate_repeats(self):
         self.assertEqual(
@@ -112,6 +135,23 @@ class AnchorTests(unittest.TestCase):
 
     def test_an_html_anchor_inside_a_code_block_is_an_example(self):
         self.assertEqual(links.heading_anchors('```\n<a name="nope"></a>\n```\n'), set())
+
+    def test_code_in_a_heading_keeps_its_text(self):
+        self.assertEqual(links.heading_anchors("# Use `foo` here\n"), {"use-foo-here"})
+
+    def test_a_link_or_an_image_in_a_heading_contributes_its_text_only(self):
+        self.assertEqual(links.heading_anchors("# [Guide](guide.md)\n## ![Logo](a.png) Name\n"), {"guide", "logo-name"})
+
+    def test_a_heading_may_be_indented_by_up_to_three_spaces(self):
+        self.assertEqual(links.heading_anchors("   # Title\n"), {"title"})
+        self.assertEqual(links.heading_anchors("    # Code block\n"), set())
+
+    def test_a_repeated_title_never_takes_an_anchor_that_already_exists(self):
+        self.assertEqual(links.heading_anchors("# Foo\n# Foo\n# Foo-1\n# Foo\n"), {"foo", "foo-1", "foo-1-1", "foo-2"})
+
+    def test_only_id_and_name_attributes_are_html_anchors(self):
+        text = '<div data-id="fake"></div>\n<!-- <a id="commented"></a> -->\n<a id="one" name="two"></a>\n<a id=plain></a>\n'
+        self.assertEqual(links.heading_anchors(text), {"one", "two", "plain"})
 
     def test_headings_inside_fenced_code_blocks_are_not_anchors(self):
         self.assertEqual(links.heading_anchors("# Real\n```\n# Not a heading\n```\n"), {"real"})
@@ -163,6 +203,61 @@ class CheckDocumentsTests(unittest.TestCase):
         directory, root = make_repo({"README.md": "[docs](docs/)\n", "docs/guide.md": "# Guide\n"})
         with directory:
             self.assertEqual(links.check_documents(root, [root / "README.md"]), [])
+
+
+class RobustnessTests(unittest.TestCase):
+    def test_a_target_that_cannot_be_used_is_reported_and_the_run_goes_on(self):
+        directory, root = make_repo({"README.md": "[a](a%00.md) [b](gone.md) [c](http://[oops)\n"})
+        with directory:
+            errors = links.check_documents(root, [root / "README.md"])
+        self.assertEqual(errors, ["README.md: invalid link target: a%00.md", "README.md: missing link target: gone.md"])
+
+    def test_a_file_that_cannot_be_read_is_reported_and_the_others_are_still_checked(self):
+        directory, root = make_repo({"ok.md": "[g](gone.md)\n"})
+        with directory:
+            (root / "bad.md").write_bytes(b"\xff\xfe not utf-8")
+            errors = links.check_documents(root, [root / "bad.md", root / "ok.md"])
+        self.assertEqual(errors, ["bad.md: cannot read the file (UnicodeDecodeError)", "ok.md: missing link target: gone.md"])
+
+    def test_a_document_that_is_a_symlink_to_outside_the_repository_is_skipped(self):
+        outside = tempfile.TemporaryDirectory()
+        directory, root = make_repo({"docs/real.md": "# Real\n"})
+        with directory, outside:
+            secret = Path(outside.name) / "secret.md"
+            secret.write_text("[x](gone.md)\n", encoding="utf-8")
+            (root / "README.md").symlink_to(secret)
+            errors = links.check_documents(root, [root / "README.md"])
+        self.assertEqual(errors, ["README.md: skipped, it resolves outside the repository"])
+
+    def test_a_directory_named_like_a_document_is_not_read(self):
+        directory, root = make_repo({"keep.md": "# Keep\n"})
+        with directory:
+            (root / "folder.md").mkdir()
+            found = [path.name for path in links.markdown_documents(root)]
+        self.assertEqual(found, ["keep.md"])
+
+    def test_control_and_bidirectional_characters_never_reach_the_report(self):
+        text = "[x](missing\x1b[2Jb\u202e.md)\n"
+        directory, root = make_repo({"README.md": text})
+        with directory:
+            code, _, err = run_main([str(root)])
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "README.md: missing link target: missing?[2Jb?.md\n")
+
+    def test_the_same_target_file_is_read_once_however_many_links_point_at_it(self):
+        directory, root = make_repo({"README.md": "[a](g.md#x) [b](g.md#x) [c](g.md#y)\n", "g.md": "# X\n"})
+        reads = []
+        original = Path.read_text
+        def counting(self, *args, **kwargs):
+            reads.append(self.name)
+            return original(self, *args, **kwargs)
+        with directory:
+            Path.read_text = counting
+            try:
+                links.check_documents(root, [root / "README.md"])
+            finally:
+                Path.read_text = original
+        self.assertEqual(reads.count("g.md"), 1)
 
 
 class DiscoveryTests(unittest.TestCase):
