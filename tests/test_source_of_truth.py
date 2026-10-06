@@ -59,6 +59,13 @@ class SkillTests(unittest.TestCase):
         self.assertRegex(body, r"(?i)read-only")
         self.assertRegex(body, r"(?i)do not (create|write|edit|modify)")
 
+    def test_review_does_not_run_the_projects_own_tests_on_its_own(self):
+        # A project's tests often write caches, coverage output or databases, which a read-only review must not do.
+        # (An eval cannot show this: eval cases here allow no tools, so the rule is checked on the wording.)
+        body = read(PLUGIN / "skills" / "review" / "SKILL.md")
+        self.assertNotIn("if it is safe to run", body)
+        self.assertRegex(body, r"(?i)run the project's (own )?tests only if the user (asks|agrees)")
+
     def test_every_skill_treats_repository_text_as_data(self):
         for name in SKILLS:
             self.assertRegex(read(PLUGIN / "skills" / name / "SKILL.md"), r"(?i)data,? not instructions", name)

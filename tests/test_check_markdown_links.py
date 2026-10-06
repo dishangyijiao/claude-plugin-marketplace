@@ -64,6 +64,13 @@ class LinkExtractionTests(unittest.TestCase):
         self.assertEqual(list(links.markdown_links("[top](#top)")), ["#top"])
 
 
+    def test_a_target_with_balanced_parentheses_is_kept_whole(self):
+        self.assertEqual(list(links.markdown_links("[a](docs/a_(b).md) then [c](plain.md)")), ["docs/a_(b).md", "plain.md"])
+
+    def test_a_title_after_a_target_with_parentheses_is_dropped(self):
+        self.assertEqual(list(links.markdown_links('[a](docs/a_(b).md "The title")')), ["docs/a_(b).md"])
+
+
 class AnchorTests(unittest.TestCase):
     def test_heading_anchors_normalize_text_and_disambiguate_repeats(self):
         self.assertEqual(
@@ -74,6 +81,25 @@ class AnchorTests(unittest.TestCase):
     def test_each_space_becomes_one_hyphen_and_punctuation_does_not_merge_them(self):
         # GitHub removes the ampersand but keeps both spaces; hyphens are kept as typed.
         self.assertEqual(links.heading_anchors("# A & B\n## A - B"), {"a--b", "a---b"})
+
+    def test_setext_headings_are_anchors(self):
+        text = "Top title\n=========\n\nSecond one\n----------\n\nSecond one\n----------\n"
+        self.assertEqual(links.heading_anchors(text), {"top-title", "second-one", "second-one-1"})
+
+    def test_atx_and_setext_headings_share_one_duplicate_count_in_document_order(self):
+        text = "# Same\n\nSame\n====\n\n## Same\n"
+        self.assertEqual(links.heading_anchors(text), {"same", "same-1", "same-2"})
+
+    def test_a_table_separator_row_or_a_rule_after_a_blank_line_is_not_a_heading(self):
+        text = "| a | b |\n|---|---|\n| 1 | 2 |\n\ntext\n\n---\n"
+        self.assertEqual(links.heading_anchors(text), set())
+
+    def test_html_anchors_with_a_name_or_an_id_are_anchors(self):
+        text = '<a name="custom-name"></a>\n<a id=\'other-id\'>x</a>\n<div id="box"></div>\n'
+        self.assertEqual(links.heading_anchors(text), {"custom-name", "other-id", "box"})
+
+    def test_an_html_anchor_inside_a_code_block_is_an_example(self):
+        self.assertEqual(links.heading_anchors('```\n<a name="nope"></a>\n```\n'), set())
 
     def test_headings_inside_fenced_code_blocks_are_not_anchors(self):
         self.assertEqual(links.heading_anchors("# Real\n```\n# Not a heading\n```\n"), {"real"})
@@ -99,6 +125,15 @@ class CheckDocumentsTests(unittest.TestCase):
         with directory:
             errors = links.check_documents(root, [root / "README.md"])
         self.assertEqual(errors, ["README.md: missing heading anchor: g.md#rust-js"])
+
+    def test_links_to_a_filename_with_parentheses_and_to_html_anchors_resolve(self):
+        directory, root = make_repo({
+            "README.md": "[p](docs/a_(b).md) [h](docs/x.md#custom-name) [s](docs/x.md#setext-heading)\n",
+            "docs/a_(b).md": "a",
+            "docs/x.md": '# X\n<a name="custom-name"></a>\nSetext heading\n===============\n',
+        })
+        with directory:
+            self.assertEqual(links.check_documents(root, [root / "README.md"]), [])
 
     def test_a_link_that_leaves_the_repository_is_an_error(self):
         directory, root = make_repo({"inner/README.md": "[out](../../outside.md)\n"})
