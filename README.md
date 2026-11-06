@@ -81,15 +81,30 @@ Eight measurements: five favour the plugin, one is a tie and two favour the base
 
 **Control experiment for `review` (one run per arm, same read-only tools, 2 repositories):** the no-plugin arm was told the nine layer names and nothing else. Neither arm clearly won. The plugin arm judged applicability better (on a personal dotfiles repository it called PRD and requirements optional and observability not applicable, and proposed an `AGENTS.md`; the baseline asked for a new scope document with numbered requirements), listed what it had read, and marked unknowns. The baseline found more concrete cross-document conflicts that I verified as true (the remote still pointing at the old project name, a stale file count, an architecture page missing two gates, two docs giving different apply orders) because it read more files, while the plugin arm read fewer and missed them. The plugin arm found a tracked `.pyc` pair that the baseline missed. So the measured effect is better proportion and honesty about evidence, not more findings. What the plugin adds is consistency: the same templates, applicability states and checks each time, which these cases do not measure.
 
+## Plugin: `devloop`
+
+Playbooks for problems that come up in the everyday development loop (not in the product code). Core principles: **a note from an earlier session is a claim that must be re-checked; approval for one action does not carry to the next; classify a failure before fixing it.**
+
+| Skill | When to use it |
+|---|---|
+| `devloop` | Entry point: picks the right skill when the problem is in the development process |
+| `devloop:continue-work` | The user says "continue" after a usage limit, a restart or in a fresh window: read the hand-off (or recover state from git), re-check what changed, report in a few lines, then take the next step. Old approvals are asked for again before push, merge, deploy or data writes |
+| `devloop:ci-failure-triage` | CI is red: find the failing job on the current head, quote the first real error, classify it (real, flaky, infrastructure, workflow configuration, already broken on the base branch) and give the smallest correct fix without weakening any check |
+
+The skills are plain `SKILL.md` files (only `name` and `description` in the front matter) with no bundled scripts, so they also work in other agent tools that read the open Agent Skills format: copy `plugins/devloop/skills/*` into that tool's skills directory (for example `.agents/skills/`). Where each tool looks was taken from documentation, **not tested here**; only Claude Code is tested.
+
+Status: `plugins/devloop/evals/` holds 6 cases (2 for `continue-work`, 3 for `ci-failure-triage`, 1 negative control). They were written before the skills. They have **not been run yet** (they cost money, see Evaluation), so there is no measured effect to report.
+
 ## Install
 
 ```bash
 claude plugin marketplace add dishangyijiao/claude-plugin-marketplace
 claude plugin install ci-perf@dishangyijiao-plugins
 claude plugin install source-of-truth@dishangyijiao-plugins
+claude plugin install devloop@dishangyijiao-plugins
 ```
 
-Try it locally without installing: `claude --plugin-dir plugins/ci-perf` or `claude --plugin-dir plugins/source-of-truth`
+Try it locally without installing: `claude --plugin-dir plugins/ci-perf`, `claude --plugin-dir plugins/source-of-truth` or `claude --plugin-dir plugins/devloop`
 
 ## Development
 

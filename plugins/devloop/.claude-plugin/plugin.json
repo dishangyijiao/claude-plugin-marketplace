@@ -1,0 +1,19 @@
+{
+  "name": "devloop",
+  "version": "0.1.0",
+  "description": "Playbooks for problems in the everyday development loop: resume interrupted work without repeating or over-trusting stale notes, and triage a failing CI run into real, flaky, infrastructure, configuration or already-broken-on-base.",
+  "author": {
+    "name": "dishangyijiao",
+    "url": "https://github.com/dishangyijiao"
+  },
+  "keywords": [
+    "workflow",
+    "ci",
+    "triage",
+    "handoff",
+    "resume"
+  ],
+  "license": "MIT",
+  "repository": "https://github.com/dishangyijiao/claude-plugin-marketplace",
+  "homepage": "https://github.com/dishangyijiao/claude-plugin-marketplace"
+}

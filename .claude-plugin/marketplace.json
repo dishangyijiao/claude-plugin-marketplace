@@ -15,6 +15,11 @@
       "name": "source-of-truth",
       "description": "Repository-as-source-of-truth playbook across nine engineering layers: scaffold a new project, review an existing one against the layers (read-only), and fill the gaps one reviewable step at a time.",
       "source": "./plugins/source-of-truth"
+    },
+    {
+      "name": "devloop",
+      "description": "Playbooks for everyday development-loop problems: resume interrupted work after re-checking stale notes, and triage a failing CI run (real, flaky, infrastructure, configuration, or already broken on the base branch).",
+      "source": "./plugins/devloop"
     }
   ]
 }
