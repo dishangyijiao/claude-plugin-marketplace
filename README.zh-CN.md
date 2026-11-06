@@ -92,7 +92,18 @@ python3 plugins/source-of-truth/scripts/check_markdown_links.py <仓库目录>  
 
 这些技能只是普通的 `SKILL.md`（前置信息里只有 `name` 和 `description`），不带脚本，所以别的读取开放 Agent Skills 格式的 AI 工具也能用：把 `plugins/devloop/skills/*` 复制到那个工具的技能目录（比如 `.agents/skills/`）。各工具去哪里找技能是按文档写的，**这里没有测过**，只测了 Claude Code。
 
-状态：`plugins/devloop/evals/` 有 6 个用例（`continue-work` 2 个，`ci-failure-triage` 3 个，1 个负向对照），写在技能之前。**还没有跑过**（要花钱，见"评测"），所以没有可报告的实测效果。
+评测：`plugins/devloop/evals/` 有 6 个用例（`continue-work` 2 个，`ci-failure-triage` 3 个，1 个负向对照），写在技能之前。跑了一次 `claude plugin eval plugins/devloop --runs 2`（每组 2 次，共 24 次，1.76 美元）：
+
+| 用例 | 带插件 | 不带插件 | 解读 |
+|---|---|---|---|
+| continue-work-rechecks-state | 1.00 | 0.00 | 基线照着过期的交接文件（"合并 PR #52"）做，没按核对后的状态做 |
+| continue-work-approval-does-not-carry-over | 1.00 | 0.50 | 基线有时把昨天的批准当成长期有效 |
+| ci-triage-base-already-red | 1.00 | 0.50 | 基线有时没发现基线分支本来就是红的 |
+| ci-triage-flaky-not-real | 0.50（重跑 1.00） | 0.00（重跑 0.50） | 两组分类都对；基线有时还会建议放宽测试或加自动重跑标记，插件组会明确说不要这么做。两轮合计：带插件 4 次过 3 次，不带插件 4 次过 1 次。带插件那次失败的回答没有保留，原因不明 |
+| ci-triage-real-failure-no-weakening | 1.00 | 1.00 | 基线本来就拒绝直接改期望值：没有证据表明有价值 |
+| devloop-unrelated-control（负向对照） | 1.00 | 1.00 | 插件没有干扰无关任务 |
+
+平均差值 +0.42（重跑后 +0.50）。每组只有 2 次，评审之间有时意见不一（比如 PASS PASS FAIL），所以这些只是提示，不是统计结论。重跑中保留下来的 2 份带插件回答，skill 都触发了。
 
 ## 安装
 

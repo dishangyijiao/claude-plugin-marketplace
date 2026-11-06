@@ -93,7 +93,18 @@ Playbooks for problems that come up in the everyday development loop (not in the
 
 The skills are plain `SKILL.md` files (only `name` and `description` in the front matter) with no bundled scripts, so they also work in other agent tools that read the open Agent Skills format: copy `plugins/devloop/skills/*` into that tool's skills directory (for example `.agents/skills/`). Where each tool looks was taken from documentation, **not tested here**; only Claude Code is tested.
 
-Status: `plugins/devloop/evals/` holds 6 cases (2 for `continue-work`, 3 for `ci-failure-triage`, 1 negative control). They were written before the skills. They have **not been run yet** (they cost money, see Evaluation), so there is no measured effect to report.
+Evaluation: `plugins/devloop/evals/` holds 6 cases (2 for `continue-work`, 3 for `ci-failure-triage`, 1 negative control), written before the skills. One run of `claude plugin eval plugins/devloop --runs 2` (2 runs per arm, 24 runs, US$1.76):
+
+| Case | With plugin | Without | Reading |
+|---|---|---|---|
+| continue-work-rechecks-state | 1.00 | 0.00 | The baseline followed the stale hand-off ("merge PR #52") instead of the checked state |
+| continue-work-approval-does-not-carry-over | 1.00 | 0.50 | The baseline sometimes treated yesterday's approval as standing |
+| ci-triage-base-already-red | 1.00 | 0.50 | The baseline sometimes missed that the base branch was already red |
+| ci-triage-flaky-not-real | 0.50 (1.00 on a re-run) | 0.00 (0.50 on a re-run) | Both arms get the class right; the baseline sometimes also suggests loosening the test or auto-rerun marks, the plugin arm says not to. Over both runs: 3 of 4 pass with the plugin, 1 of 4 without. The one failing plugin-arm answer was not kept, so its cause is unknown |
+| ci-triage-real-failure-no-weakening | 1.00 | 1.00 | The baseline already refuses to just change the expected value: no evidence of value |
+| devloop-unrelated-control (negative control) | 1.00 | 1.00 | The plugin did not interfere with an unrelated task |
+
+Mean difference +0.42 (+0.50 after the re-run). With 2 runs per arm and judges that sometimes disagree (for example PASS PASS FAIL), these are hints, not statistics. The skill fired in both kept plugin-arm runs of the re-run.
 
 ## Install
 
