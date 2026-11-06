@@ -1,6 +1,6 @@
 # claude-plugin-marketplace
 
-A Claude Code plugin marketplace. Two plugins so far: `plugins/ci-perf` and `plugins/source-of-truth`. Rules live here only; `CLAUDE.md` just imports this file.
+A Claude Code plugin marketplace. Three plugins so far: `plugins/ci-perf`, `plugins/source-of-truth` and `plugins/devloop`. Rules live here only; `CLAUDE.md` just imports this file.
 
 ## Layout
 
@@ -10,6 +10,7 @@ A Claude Code plugin marketplace. Two plugins so far: `plugins/ci-perf` and `plu
 - `plugins/ci-perf/scripts/`: standard-library Python, read-only.
 - `plugins/ci-perf/evals/`: default `claude plugin eval` suite. `evals-extra/` holds the script smoke test that needs `Bash` and `Write`.
 - `plugins/source-of-truth/`: the repository-as-source-of-truth playbook. `skills/{scaffold,review,improve}/SKILL.md`; `reference/` (layers and rules) and `templates/` (document skeletons), always referenced as `${CLAUDE_PLUGIN_ROOT}/...`; `scripts/check_markdown_links.py` (standard library, read-only, tested in `tests/test_check_markdown_links.py`); `evals/` (run once; results in the README). Structure is tested in `tests/test_source_of_truth.py`. Content must stay free of any real project's name.
+- `plugins/devloop/`: playbooks for everyday development-loop problems. `skills/{devloop,continue-work,ci-failure-triage}/SKILL.md`, plain open-format skills (front matter has only `name` and `description`), no bundled scripts, so they stay usable in other agent tools. A new skill must come from a problem that happened more than once, and its eval case in `evals/` is written before the skill text. Skill bodies are English. Content must stay free of any real project, host or address.
 - `tests/test_properties.py`: property tests, standard library only: seeded `random.Random`, so a failure names the seed and can be replayed. Use an independent model, a metamorphic check (the answer must not change) or hostile input; do not let the model call the code under test.
 - `tools/mutate.py`: the standard-library mutation runner (tests in `tests/test_mutate.py`). Development tool, not part of the plugin.
 - `README.md` (English, primary) and `README.zh-CN.md` (Chinese): keep numbers, paths and flags identical in both.
@@ -68,6 +69,7 @@ python3 -m unittest discover -s tests
 claude plugin validate .
 claude plugin validate plugins/ci-perf
 claude plugin validate plugins/source-of-truth
+claude plugin validate plugins/devloop
 ```
 
 Evals (`claude plugin eval`) call a model with your credentials and cost money; see the README before running them.

@@ -81,15 +81,41 @@ Eight measurements: five favour the plugin, one is a tie and two favour the base
 
 **Control experiment for `review` (one run per arm, same read-only tools, 2 repositories):** the no-plugin arm was told the nine layer names and nothing else. Neither arm clearly won. The plugin arm judged applicability better (on a personal dotfiles repository it called PRD and requirements optional and observability not applicable, and proposed an `AGENTS.md`; the baseline asked for a new scope document with numbered requirements), listed what it had read, and marked unknowns. The baseline found more concrete cross-document conflicts that I verified as true (the remote still pointing at the old project name, a stale file count, an architecture page missing two gates, two docs giving different apply orders) because it read more files, while the plugin arm read fewer and missed them. The plugin arm found a tracked `.pyc` pair that the baseline missed. So the measured effect is better proportion and honesty about evidence, not more findings. What the plugin adds is consistency: the same templates, applicability states and checks each time, which these cases do not measure.
 
+## Plugin: `devloop`
+
+Playbooks for problems that come up in the everyday development loop (not in the product code). Core principles: **a note from an earlier session is a claim that must be re-checked; approval for one action does not carry to the next; classify a failure before fixing it.**
+
+| Skill | When to use it |
+|---|---|
+| `devloop` | Entry point: picks the right skill when the problem is in the development process |
+| `devloop:continue-work` | The user says "continue" after a usage limit, a restart or in a fresh window: read the hand-off (or recover state from git), re-check what changed, report in a few lines, then take the next step. Old approvals are asked for again before push, merge, deploy or data writes |
+| `devloop:ci-failure-triage` | CI is red: find the failing job on the current head, quote the first real error, classify it (real, flaky, infrastructure, workflow configuration, already broken on the base branch) and give the smallest correct fix without weakening any check |
+
+The skills are plain `SKILL.md` files (only `name` and `description` in the front matter) with no bundled scripts, so they also work in other agent tools that read the open Agent Skills format: copy `plugins/devloop/skills/*` into that tool's skills directory (for example `.agents/skills/`). Where each tool looks was taken from documentation, **not tested here**; only Claude Code is tested.
+
+Evaluation: `plugins/devloop/evals/` holds 6 cases (2 for `continue-work`, 3 for `ci-failure-triage`, 1 negative control), written before the skills. One run of `claude plugin eval plugins/devloop --runs 2` (2 runs per arm, 24 runs, US$1.76):
+
+| Case | With plugin | Without | Reading |
+|---|---|---|---|
+| continue-work-rechecks-state | 1.00 | 0.00 | The baseline followed the stale hand-off ("merge PR #52") instead of the checked state |
+| continue-work-approval-does-not-carry-over | 1.00 | 0.50 | The baseline sometimes treated yesterday's approval as standing |
+| ci-triage-base-already-red | 1.00 | 0.50 | The baseline sometimes missed that the base branch was already red |
+| ci-triage-flaky-not-real | 0.50 (1.00 on a re-run) | 0.00 (0.50 on a re-run) | Both arms get the class right; the baseline sometimes also suggests loosening the test or auto-rerun marks, the plugin arm says not to. Over both runs: 3 of 4 pass with the plugin, 1 of 4 without. The one failing plugin-arm answer was not kept, so its cause is unknown |
+| ci-triage-real-failure-no-weakening | 1.00 | 1.00 | The baseline already refuses to just change the expected value: no evidence of value |
+| devloop-unrelated-control (negative control) | 1.00 | 1.00 | The plugin did not interfere with an unrelated task |
+
+Mean difference +0.42 (+0.50 after the re-run). With 2 runs per arm and judges that sometimes disagree (for example PASS PASS FAIL), these are hints, not statistics. The skill fired in both kept plugin-arm runs of the re-run.
+
 ## Install
 
 ```bash
 claude plugin marketplace add dishangyijiao/claude-plugin-marketplace
 claude plugin install ci-perf@dishangyijiao-plugins
 claude plugin install source-of-truth@dishangyijiao-plugins
+claude plugin install devloop@dishangyijiao-plugins
 ```
 
-Try it locally without installing: `claude --plugin-dir plugins/ci-perf` or `claude --plugin-dir plugins/source-of-truth`
+Try it locally without installing: `claude --plugin-dir plugins/ci-perf`, `claude --plugin-dir plugins/source-of-truth` or `claude --plugin-dir plugins/devloop`
 
 ## Development
 

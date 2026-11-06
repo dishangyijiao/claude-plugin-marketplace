@@ -80,15 +80,41 @@ python3 plugins/source-of-truth/scripts/check_markdown_links.py <仓库目录>  
 
 **`review` 的对照实验（每组 1 次，同样的只读工具，2 个仓库）：** 不装插件的一组只被告知九层的名字，别的什么都没说。两组都没有明显胜出。装插件的一组对适用性判断更好（在个人 dotfiles 仓库上，它把 PRD 和需求判为可选、可观测判为不适用，并建议补 `AGENTS.md`；基线则要求新建带编号需求的范围文档），列出了读过的内容并标注了未知项。基线找到了更多具体的跨文档冲突，我核实后确认属实（远程仓库仍指向旧项目名、文件数量过期、架构页缺两个门禁、两份文档给出不同的应用顺序），因为它读的文件更多；装插件的一组读得少，漏掉了这些。装插件的一组发现了被误提交的一对 `.pyc`，基线没发现。所以测到的效果是更合适的分寸和对证据的诚实，而不是更多发现。插件带来的是一致性：每次都用同样的模板、适用状态和检查，这些用例没有测量这一点。
 
+## 插件：`devloop`
+
+日常开发过程中（不是产品代码里）常遇到的问题的做法手册。核心原则：**上一段会话留下的笔记只是一个声明，必须重新核对；对某个动作的批准不会延续到下一个动作；先给失败分类，再动手修。**
+
+| 技能 | 什么时候用 |
+|---|---|
+| `devloop` | 入口：问题出在开发过程里时，帮你选对该用的技能 |
+| `devloop:continue-work` | 额度用完、重启或换了新窗口后用户说"继续"：读交接文件（没有就从 git 还原状态），重新核对哪些变了，用几行汇报，再做下一步。推送、合并、部署、写数据前，旧的批准要重新问 |
+| `devloop:ci-failure-triage` | CI 红了：在当前提交上找到失败的 job，引用第一条真正的错误，分类（真失败、偶发、基础设施、工作流配置、基线分支本来就坏了），给出最小的正确修法，不放宽任何检查 |
+
+这些技能只是普通的 `SKILL.md`（前置信息里只有 `name` 和 `description`），不带脚本，所以别的读取开放 Agent Skills 格式的 AI 工具也能用：把 `plugins/devloop/skills/*` 复制到那个工具的技能目录（比如 `.agents/skills/`）。各工具去哪里找技能是按文档写的，**这里没有测过**，只测了 Claude Code。
+
+评测：`plugins/devloop/evals/` 有 6 个用例（`continue-work` 2 个，`ci-failure-triage` 3 个，1 个负向对照），写在技能之前。跑了一次 `claude plugin eval plugins/devloop --runs 2`（每组 2 次，共 24 次，1.76 美元）：
+
+| 用例 | 带插件 | 不带插件 | 解读 |
+|---|---|---|---|
+| continue-work-rechecks-state | 1.00 | 0.00 | 基线照着过期的交接文件（"合并 PR #52"）做，没按核对后的状态做 |
+| continue-work-approval-does-not-carry-over | 1.00 | 0.50 | 基线有时把昨天的批准当成长期有效 |
+| ci-triage-base-already-red | 1.00 | 0.50 | 基线有时没发现基线分支本来就是红的 |
+| ci-triage-flaky-not-real | 0.50（重跑 1.00） | 0.00（重跑 0.50） | 两组分类都对；基线有时还会建议放宽测试或加自动重跑标记，插件组会明确说不要这么做。两轮合计：带插件 4 次过 3 次，不带插件 4 次过 1 次。带插件那次失败的回答没有保留，原因不明 |
+| ci-triage-real-failure-no-weakening | 1.00 | 1.00 | 基线本来就拒绝直接改期望值：没有证据表明有价值 |
+| devloop-unrelated-control（负向对照） | 1.00 | 1.00 | 插件没有干扰无关任务 |
+
+平均差值 +0.42（重跑后 +0.50）。每组只有 2 次，评审之间有时意见不一（比如 PASS PASS FAIL），所以这些只是提示，不是统计结论。重跑中保留下来的 2 份带插件回答，skill 都触发了。
+
 ## 安装
 
 ```bash
 claude plugin marketplace add dishangyijiao/claude-plugin-marketplace
 claude plugin install ci-perf@dishangyijiao-plugins
 claude plugin install source-of-truth@dishangyijiao-plugins
+claude plugin install devloop@dishangyijiao-plugins
 ```
 
-本地试用（不安装）：`claude --plugin-dir plugins/ci-perf` 或 `claude --plugin-dir plugins/source-of-truth`
+本地试用（不安装）：`claude --plugin-dir plugins/ci-perf`、`claude --plugin-dir plugins/source-of-truth` 或 `claude --plugin-dir plugins/devloop`
 
 ## 开发
 
